@@ -13,6 +13,17 @@ from .evals import (
     write_submission_evals,
 )
 from .manifest import ManifestError, compile_manifest, load_metadata, write_compiled_manifest
+from .marketplace import (
+    DEFAULT_CACHE_ROOT,
+    DEFAULT_EVIDENCE_OUTPUT,
+    DEFAULT_MARKETPLACE_DISPLAY_NAME,
+    DEFAULT_MARKETPLACE_NAME,
+    MarketplaceError,
+    compile_marketplace_bridge,
+    verify_marketplace_install,
+    write_install_evidence,
+    write_marketplace_bridge,
+)
 from .scanner import ScanError, scan_candidate
 
 
@@ -59,6 +70,66 @@ def build_parser() -> argparse.ArgumentParser:
     evals.add_argument("--write", action="store_true", help="Write the generated eval report")
     evals.add_argument("--force", action="store_true", help="Allow --write to replace a differing eval report")
     evals.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
+
+    marketplace = sub.add_parser("marketplace", help="Bridge and verify local plugin marketplaces")
+    marketplace_sub = marketplace.add_subparsers(dest="marketplace_command", required=True)
+
+    bridge = marketplace_sub.add_parser("bridge", help="Compile or write a repo marketplace bridge")
+    bridge.add_argument("path", nargs="?", default=".", help="Plugin candidate directory")
+    bridge.add_argument(
+        "--root",
+        type=Path,
+        required=True,
+        help="Marketplace root containing .agents/plugins/marketplace.json",
+    )
+    bridge.add_argument(
+        "--marketplace-name",
+        default=DEFAULT_MARKETPLACE_NAME,
+        help=f"Marketplace id (default: {DEFAULT_MARKETPLACE_NAME})",
+    )
+    bridge.add_argument(
+        "--marketplace-display-name",
+        default=DEFAULT_MARKETPLACE_DISPLAY_NAME,
+        help=f"Marketplace picker label (default: {DEFAULT_MARKETPLACE_DISPLAY_NAME})",
+    )
+    bridge.add_argument("--category", help="Marketplace category; falls back to plugin metadata")
+    bridge.add_argument(
+        "--installation",
+        default="AVAILABLE",
+        choices=["AVAILABLE", "INSTALLED_BY_DEFAULT", "NOT_AVAILABLE"],
+    )
+    bridge.add_argument(
+        "--authentication",
+        default="ON_INSTALL",
+        choices=["ON_INSTALL", "ON_FIRST_USE", "NONE"],
+    )
+    bridge.add_argument("--write", action="store_true", help="Stage plugin files and write marketplace.json")
+    bridge.add_argument("--force", action="store_true", help="Replace differing staged/catalog files")
+    bridge.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
+
+    verify = marketplace_sub.add_parser("verify", help="Verify the installed ChatGPT/Codex cache copy")
+    verify.add_argument("path", nargs="?", default=".", help="Original plugin candidate directory")
+    verify.add_argument("--root", type=Path, required=True, help="Marketplace root used by bridge")
+    verify.add_argument(
+        "--marketplace-name",
+        default=DEFAULT_MARKETPLACE_NAME,
+        help=f"Marketplace id (default: {DEFAULT_MARKETPLACE_NAME})",
+    )
+    verify.add_argument(
+        "--cache-root",
+        type=Path,
+        default=Path(DEFAULT_CACHE_ROOT),
+        help=f"Installed plugin cache root (default: {DEFAULT_CACHE_ROOT})",
+    )
+    verify.add_argument("--cache-version", default="local", help="Installed cache version directory")
+    verify.add_argument(
+        "--evidence-output",
+        default=DEFAULT_EVIDENCE_OUTPUT,
+        help=f"Relative evidence output path (default: {DEFAULT_EVIDENCE_OUTPUT})",
+    )
+    verify.add_argument("--write-evidence", action="store_true", help="Write executed verification evidence")
+    verify.add_argument("--force", action="store_true", help="Replace differing evidence output")
+    verify.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
     return parser
 
 
@@ -71,6 +142,11 @@ def main(argv: list[str] | None = None) -> int:
         return _run_manifest(args)
     if args.command == "evals":
         return _run_evals(args)
+    if args.command == "marketplace":
+        if args.marketplace_command == "bridge":
+            return _run_marketplace_bridge(args)
+        if args.marketplace_command == "verify":
+            return _run_marketplace_verify(args)
     return 1
 
 
@@ -128,6 +204,56 @@ def _run_evals(args: argparse.Namespace) -> int:
 
     _print_json(report, pretty=args.pretty)
     return 0 if report["validation"]["valid"] else 2
+
+
+def _run_marketplace_bridge(args: argparse.Namespace) -> int:
+    try:
+        report = compile_marketplace_bridge(
+            Path(args.path),
+            args.root,
+            marketplace_name=args.marketplace_name,
+            marketplace_display_name=args.marketplace_display_name,
+            category=args.category,
+            installation=args.installation,
+            authentication=args.authentication,
+        )
+        if args.write:
+            report["written"] = write_marketplace_bridge(
+                Path(args.path),
+                args.root,
+                report,
+                force=args.force,
+            )
+    except MarketplaceError as exc:
+        _print_error(str(exc))
+        return 1
+
+    _print_json(report, pretty=args.pretty)
+    return 0 if report["validation"]["valid"] else 2
+
+
+def _run_marketplace_verify(args: argparse.Namespace) -> int:
+    try:
+        report = verify_marketplace_install(
+            Path(args.path),
+            args.root,
+            marketplace_name=args.marketplace_name,
+            cache_root=args.cache_root,
+            cache_version=args.cache_version,
+        )
+        if args.write_evidence:
+            report["written"] = write_install_evidence(
+                Path(args.path),
+                report,
+                output=args.evidence_output,
+                force=args.force,
+            )
+    except MarketplaceError as exc:
+        _print_error(str(exc))
+        return 1
+
+    _print_json(report, pretty=args.pretty)
+    return 0 if report["install_verified"] else 2
 
 
 def _apply_manifest_overrides(metadata: dict, args: argparse.Namespace) -> dict:
