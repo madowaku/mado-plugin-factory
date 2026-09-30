@@ -1,0 +1,43 @@
+version: 1
+review_required: true
+
+positive:
+  - id: P1
+    user_prompt: ""
+    expected_behavior: ""
+    expected_result_shape: ""
+    fixture: ""
+  - id: P2
+    user_prompt: ""
+    expected_behavior: ""
+    expected_result_shape: ""
+    fixture: ""
+  - id: P3
+    user_prompt: ""
+    expected_behavior: ""
+    expected_result_shape: ""
+    fixture: ""
+  - id: P4
+    user_prompt: ""
+    expected_behavior: ""
+    expected_result_shape: ""
+    fixture: ""
+  - id: P5
+    user_prompt: ""
+    expected_behavior: ""
+    expected_result_shape: ""
+    fixture: ""
+
+negative:
+  - id: N1
+    user_prompt_or_scenario: ""
+    expected_safe_behavior: ""
+    reason_not_to_complete: ""
+  - id: N2
+    user_prompt_or_scenario: ""
+    expected_safe_behavior: ""
+    reason_not_to_complete: ""
+  - id: N3
+    user_prompt_or_scenario: ""
+    expected_safe_behavior: ""
+    reason_not_to_complete: ""
