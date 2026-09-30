@@ -7,7 +7,7 @@
 - [ ] Plugin name is stable and kebab-case.
 - [ ] Skills are under `skills/<name>/SKILL.md`.
 - [ ] Root `mcp.json` uses the portable Agent Plugins MCP schema when bundled MCP is used.
-- [ ] Any `.codex-plugin/plugin.json` is treated as an optional compatibility fallback, not the canonical portable manifest.
+- [ ] Any `.codex-plugin/plugin.json` is treated as an optional compatibility mirror, not the canonical portable manifest.
 - [ ] Only `plugin.json` is stored inside `.codex-plugin/`.
 
 ## Candidate scan
@@ -19,6 +19,19 @@
 - [ ] Risk flags and evidence paths were reviewed.
 - [ ] Missing requirements are empty or intentionally documented.
 - [ ] Source candidate remained unmodified.
+
+## Manifest compile
+
+- [ ] `mpf manifest` completed with `validation.valid: true`.
+- [ ] Portable `plugin.json` is the canonical output.
+- [ ] `extensions.com.openai.interface.displayName` is present.
+- [ ] `extensions.com.openai.interface.shortDescription` is present and single-line.
+- [ ] Package-level validation errors are empty.
+- [ ] Final-directory length warnings were reviewed.
+- [ ] Publisher identity and legal URLs were supplied, not inferred.
+- [ ] Component and asset paths begin with `./` and stay inside the plugin root.
+- [ ] Compatibility output, if generated, mirrors portable intent and does not invent `.mcp.json`.
+- [ ] Existing manifests were not overwritten without explicit `--force`.
 
 ## Behavior
 
