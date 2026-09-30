@@ -1,0 +1,20 @@
+{
+  "default_fixture": "REVIEW REQUIRED: replace with reproducible fixture/test-account data, or explicitly state that none is required.",
+  "positive": [
+    {
+      "intent_key": "primary-reviewed-workflow",
+      "user_prompt": "Replace with a realistic intended-use prompt.",
+      "expected_behavior": "Replace with the Skill/tool/workflow behavior reviewers should observe.",
+      "expected_result_shape": "Replace with the expected user-facing result shape.",
+      "fixture": "Replace with reproducible fixture/test-account data."
+    }
+  ],
+  "negative": [
+    {
+      "intent_key": "reviewed-boundary",
+      "user_prompt_or_scenario": "Replace with a realistic request the plugin should not complete directly.",
+      "expected_safe_behavior": "Replace with refusal, clarification, confirmation, or safe fallback behavior.",
+      "reason_not_to_complete": "Explain why the requested action should not be completed."
+    }
+  ]
+}
