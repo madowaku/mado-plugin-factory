@@ -2,11 +2,23 @@
 
 ## Structure
 
-- [ ] `.codex-plugin/plugin.json` exists.
+- [ ] Root `plugin.json` exists for the portable Agent Plugins package.
+- [ ] Root `plugin.json` declares the supported Agent Plugins `$schema`.
 - [ ] Plugin name is stable and kebab-case.
-- [ ] Component paths are relative to plugin root and begin with `./`.
 - [ ] Skills are under `skills/<name>/SKILL.md`.
+- [ ] Root `mcp.json` uses the portable Agent Plugins MCP schema when bundled MCP is used.
+- [ ] Any `.codex-plugin/plugin.json` is treated as an optional compatibility fallback, not the canonical portable manifest.
 - [ ] Only `plugin.json` is stored inside `.codex-plugin/`.
+
+## Candidate scan
+
+- [ ] `mpf scan` completed successfully.
+- [ ] Architecture classification is expected.
+- [ ] Architecture reason was reviewed.
+- [ ] External dependencies were reviewed.
+- [ ] Risk flags and evidence paths were reviewed.
+- [ ] Missing requirements are empty or intentionally documented.
+- [ ] Source candidate remained unmodified.
 
 ## Behavior
 
