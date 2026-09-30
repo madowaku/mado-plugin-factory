@@ -1,4 +1,4 @@
-# MADO_PLUGIN_FACTORY_SPEC.md v0.2
+# MADO_PLUGIN_FACTORY_SPEC.md v0.3
 
 Status: Implementing  
 Project: MADO Plugin Factory  
@@ -8,63 +8,9 @@ Repository: `madowaku/mado-plugin-factory`
 
 MADO Plugin Factory is a release-confidence compiler for reusable agent capabilities.
 
-Its job is to transform an existing Skill, workflow, or MCP-backed project into a plugin artifact that is:
+It transforms a Skill, workflow, or MCP-backed project into artifacts whose structure, behavior, risk surface, review materials, and evidence state can be explained.
 
-1. structurally valid,
-2. locally testable,
-3. reviewable,
-4. evidence-backed,
-5. ready for submission work.
-
-The first optimization target remains skills-only plugins, because they minimize infrastructure, authentication, and remote-MCP review surface.
-
-## 2. Packaging model
-
-The factory treats the portable Agent Plugins package as canonical:
-
-```text
-<plugin-root>/
-  plugin.json
-  skills/
-    <skill-name>/
-      SKILL.md
-  mcp.json                 # optional portable MCP
-  .codex-plugin/
-    plugin.json             # optional compatibility mirror
-```
-
-Rules:
-
-- root `plugin.json` is the portable identity.
-- portable packages discover root `skills/`.
-- portable bundled MCP configuration lives at root `mcp.json`.
-- OpenAI-specific presentation, registered-app mapping, and explicit hook settings live under `extensions.com.openai`.
-- `.codex-plugin/plugin.json` is supported as a compatibility form.
-- a compatibility manifest is never treated as the compiler's canonical portable source.
-
-## 3. Minimum portable manifest
-
-```json
-{
-  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
-  "name": "example-plugin",
-  "version": "0.1.0",
-  "description": "A reusable workflow.",
-  "extensions": {
-    "com.openai": {
-      "interface": {
-        "displayName": "Example Plugin",
-        "shortDescription": "Reusable workflow",
-        "longDescription": "A reusable workflow."
-      }
-    }
-  }
-}
-```
-
-Portable packages do not need a `skills` field to discover root `skills/`.
-
-## 4. Pipeline
+## 2. Pipeline
 
 ```text
 SOURCE
@@ -75,21 +21,21 @@ Candidate Scanner                <- M0.1 complete
   +--> architecture
   +--> skills
   +--> dependencies
-  +--> risks
-  +--> missing metadata
+  +--> risk flags
   |
   v
 Manifest Compiler                <- M0.2 complete
   |
   +--> portable plugin.json
-  +--> validation report
-  +--> optional compatibility mirror
+  +--> interface metadata
+  +--> validation
   |
   v
-Submission Eval Compiler         <- M0.3
+Submission Eval Compiler         <- M0.3 complete
   |
-  +--> 5 positive cases
-  +--> 3 negative cases
+  +--> exactly 5 positive drafts
+  +--> exactly 3 negative drafts
+  +--> review blockers
   |
   v
 Local Marketplace Bridge         <- M0.4
@@ -98,300 +44,315 @@ Local Marketplace Bridge         <- M0.4
 Submission Evidence Bundle       <- M0.5
 ```
 
-## 5. MPF-M0.1 Candidate Scanner
+## 3. Evidence states
+
+Every claim belongs to one of:
+
+- `generated`
+- `inspected`
+- `executed`
+
+A compiler step MUST NOT promote evidence to a stronger state without proof.
+
+M0.3 produces `generated` evidence only.
+
+## 4. MPF-M0.1 Candidate Scanner
 
 Status: complete.
 
-The scanner is read-only and emits one architecture:
+The scanner:
+
+- discovers production Skills
+- distinguishes portable and compatibility packaging
+- detects configured MCP surfaces
+- inventories dependencies
+- emits risk flags with file-path evidence
+- never reveals matched secrets
+- never mutates the source candidate
+
+Architecture output:
 
 - `skills_only`
 - `mcp_only`
 - `skills_plus_mcp`
 - `not_ready`
 
-It records the reason, discovered Skills, manifest/MCP surfaces, external dependencies, risk flags with evidence paths, and missing requirements.
-
-The scanner MUST NOT:
-
-- mutate the source candidate,
-- treat files under tests/templates/examples/docs/evidence as production Skills,
-- reveal matched credential or secret values.
-
-## 6. MPF-M0.2 Manifest Compiler
+## 5. MPF-M0.2 Manifest Compiler
 
 Status: complete.
 
-### 6.1 CLI
+The canonical package identity is root `plugin.json`.
 
-Dry-run:
-
-```bash
-mpf manifest <candidate-path> \
-  --name my-plugin \
-  --description "Reusable workflow" \
-  --pretty
-```
-
-Metadata-driven:
-
-```bash
-mpf manifest <candidate-path> \
-  --metadata ./manifest-metadata.json \
-  --pretty
-```
-
-Write portable output:
-
-```bash
-mpf manifest <candidate-path> \
-  --metadata ./manifest-metadata.json \
-  --write
-```
-
-Write portable + compatibility output:
-
-```bash
-mpf manifest <candidate-path> \
-  --metadata ./manifest-metadata.json \
-  --compat \
-  --write
-```
-
-A differing existing manifest is not overwritten unless `--force` is supplied.
-
-### 6.2 Input precedence
-
-For identity fields, precedence is:
-
-```text
-explicit metadata / CLI
-  >
-existing portable plugin.json
-  >
-deterministic inference
-```
-
-Current deterministic inference:
-
-- `name`: candidate directory name
-- `version`: `0.1.0`
-- `description`: the Skill description only when exactly one described Skill exists
-- `displayName`: title-cased kebab-case name
-- `shortDescription`: portable description
-- `longDescription`: portable description
-
-The compiler does not invent publisher identity, legal URLs, or claims.
-
-### 6.3 Metadata contract
-
-Portable metadata may include:
-
-- `name`
-- `version`
-- `description`
-- `author`
-- `homepage`
-- `repository`
-- `license`
-- `keywords`
-
-OpenAI interface metadata is supplied as:
-
-```json
-{
-  "interface": {
-    "displayName": "My Plugin",
-    "shortDescription": "Short listing copy",
-    "longDescription": "Longer listing copy",
-    "developerName": "Publisher",
-    "category": "Productivity",
-    "capabilities": ["Workflow"],
-    "websiteURL": "https://example.com",
-    "privacyPolicyURL": "https://example.com/privacy",
-    "termsOfServiceURL": "https://example.com/terms",
-    "defaultPrompt": ["Use My Plugin for this workflow."],
-    "brandColor": "#10A37F",
-    "composerIcon": "./assets/icon.png",
-    "logo": "./assets/logo.png",
-    "screenshots": ["./assets/screenshot-1.png"]
-  }
-}
-```
-
-The emitted portable location is:
+The compiler emits OpenAI presentation metadata under:
 
 ```text
 extensions.com.openai.interface
 ```
 
-### 6.4 Component inference
+It can optionally emit `.codex-plugin/plugin.json` as a compatibility mirror.
 
-If an existing candidate contains `.app.json`, the compiler emits:
+Default behavior is dry-run.
+
+Invalid output is not written. Differing existing manifests require explicit `--force`.
+
+## 6. MPF-M0.3 Submission Eval Compiler
+
+Status: complete.
+
+### 6.1 Goal
+
+Compile a candidate's known behavior and risk surface into the review material required for plugin submission without pretending generated cases have been manually reviewed or executed.
+
+### 6.2 CLI
+
+Dry-run:
+
+```bash
+mpf evals <candidate-path> --pretty
+```
+
+Metadata-assisted:
+
+```bash
+mpf evals <candidate-path> \
+  --metadata ./eval-metadata.json \
+  --pretty
+```
+
+Write evidence:
+
+```bash
+mpf evals <candidate-path> \
+  --metadata ./eval-metadata.json \
+  --write
+```
+
+Default output:
+
+```text
+evidence/evals/test-cases.json
+```
+
+The output path MUST remain inside the candidate root.
+
+### 6.3 Count target
+
+The compiler emits exactly:
+
+- 5 positive cases
+- 3 negative cases
+
+This satisfies the common submission requirement while matching the stricter exact-count final submission path.
+
+### 6.4 Positive case schema
 
 ```json
 {
-  "extensions": {
-    "com.openai": {
-      "apps": "./.app.json"
-    }
-  }
+  "id": "P1",
+  "intent_key": "primary-workflow",
+  "user_prompt": "...",
+  "expected_behavior": "...",
+  "expected_result_shape": "...",
+  "fixture": "...",
+  "source": "...",
+  "evidence_state": "generated",
+  "review_required": true
 }
 ```
 
-If `hooks/hooks.json` exists, it may emit:
+Required reviewer concepts:
+
+- realistic user prompt
+- expected Skill/tool/workflow behavior
+- expected result shape
+- reproducible test account or fixture data
+
+### 6.5 Positive case source precedence
+
+Candidate cases are assembled in deterministic order:
+
+1. explicit `metadata.positive`
+2. portable manifest `defaultPrompt`
+3. discovered Skill name/description
+4. deterministic workflow-focus cases
+
+Then the compiler:
+
+1. normalizes Unicode and whitespace,
+2. removes duplicate prompts,
+3. removes duplicate intent keys,
+4. takes the first five unique cases,
+5. assigns `P1` through `P5`.
+
+### 6.6 Fixture contract
+
+The compiler MUST NOT infer that a test needs no fixture.
+
+When no default or per-case fixture is supplied, it emits:
+
+```text
+REVIEW REQUIRED: describe reproducible test account or fixture data,
+or explicitly state that no special fixture is required.
+```
+
+This produces:
+
+- validation warning `fixture_review_required`
+- top-level blocker `fixture_data_requires_review`
+
+A supplied fixture is preserved as generated review material. It is not automatically treated as executed evidence.
+
+### 6.7 Negative case schema
 
 ```json
 {
-  "extensions": {
-    "com.openai": {
-      "hooks": "./hooks/hooks.json"
-    }
-  }
+  "id": "N1",
+  "intent_key": "protect-secrets",
+  "user_prompt_or_scenario": "...",
+  "expected_safe_behavior": "...",
+  "reason_not_to_complete": "...",
+  "source": "...",
+  "evidence_state": "generated",
+  "review_required": true
 }
 ```
 
-Portable `skills/` and `mcp.json` are fixed package surfaces and are not redundantly declared in the root portable manifest.
+Expected safe behavior may be:
 
-### 6.5 Compatibility mirror
+- refusal
+- clarification
+- explicit confirmation gate
+- scoped fallback
+- truthful tool/runtime failure handling
 
-`--compat` compiles an optional `.codex-plugin/plugin.json` mirror.
+### 6.8 Negative case source precedence
 
-It may contain:
+Candidate cases are assembled in deterministic order:
 
-- identity and publisher metadata,
-- `skills: "./skills/"`,
-- `mcpServers: "./.mcp.json"` only when an actual legacy `.mcp.json` exists,
-- `apps`,
-- `hooks`,
-- `interface`.
+1. explicit `metadata.negative`
+2. M0.1 risk-derived cases
+3. generic boundary cases
 
-The compiler MUST NOT invent `.mcp.json` from portable `mcp.json`.
+Risk-to-case mappings include:
 
-When portable MCP exists without legacy MCP and compatibility output is requested, emit a warning rather than a fake compatibility path.
+- `auth_or_secret_dependency` -> secret exposure
+- `destructive_operation` -> irreversible action without confirmation
+- `user_data_access` -> unrelated private-data disclosure
+- `external_network` -> unrelated endpoint/data egress
+- `mcp_runtime_dependency` -> fabricated tool success
 
-### 6.6 Validation levels
+Generic fallback intents are:
 
-Validation returns:
+- out-of-scope work
+- missing required context
+- fabricated execution success
+
+The final three unique cases receive `N1` through `N3`.
+
+### 6.9 Validation
+
+Validation errors include:
+
+- wrong positive count
+- wrong negative count
+- non-sequential IDs
+- missing required text fields
+- duplicate intent keys
+- duplicate normalized positive prompts
+- duplicate normalized negative scenarios
+- non-generated evidence state at compile time
+- a generated case with `review_required: false`
+
+Warnings include unresolved fixture review.
+
+### 6.10 Review state
+
+M0.3 output always begins with:
 
 ```json
 {
-  "valid": true,
-  "errors": [],
-  "warnings": []
+  "review_required": true,
+  "evidence_state": "generated",
+  "submission_ready": false
 }
 ```
 
-Errors block `--write`.
+At minimum the blocker is:
 
-Current error checks include:
+```text
+generated_cases_require_review
+```
 
-- supported Agent Plugins `$schema`,
-- kebab-case `name`,
-- semantic version shape,
-- non-empty portable description,
-- OpenAI extension/interface structure,
-- package-level display-name limit,
-- package-level short-description limit,
-- single-line short description,
-- relative component/asset paths,
-- paths escaping plugin root,
-- basic URL shape,
-- capabilities and starter-prompt shape,
-- six-digit brand color,
-- referenced apps/hooks file existence.
+The compiler never marks its own generated cases submission-ready.
 
-Warnings include stricter final public-directory limits where package validation can still succeed.
+### 6.11 Write safety
 
-### 6.7 Write safety
-
-Default behavior is compile-only.
+Default behavior is dry-run.
 
 `--write`:
 
-- writes only after successful validation,
-- writes root `plugin.json`,
-- optionally writes `.codex-plugin/plugin.json`,
-- refuses to replace differing existing output without `--force`,
-- permits an idempotent write when content is already identical.
+- writes only a validation-valid eval report
+- creates the parent evidence directory if needed
+- refuses to overwrite differing evidence unless `--force` is explicit
+- allows idempotent writes when bytes are already identical
+- rejects absolute paths and `..` traversal
 
-### 6.8 Determinism
+### 6.12 Determinism
 
 Given the same:
 
-- source candidate,
-- metadata,
-- compatibility option,
+- source candidate
+- portable manifest
+- scanner-observable files
+- eval metadata
 
-the compiler MUST return the same report and manifest content.
+M0.3 MUST return identical test-case ordering and content.
 
-No timestamps, random IDs, or environment-derived publisher metadata are inserted.
+No timestamps, random IDs, or environment-derived test claims are inserted.
 
-## 7. Submission eval contract
+## 7. Metadata input
 
-M0.3 will compile at least five positive and three negative cases.
+Example:
 
-Positive case fields:
-
-- id
-- user_prompt
-- expected_behavior
-- expected_result_shape
-- fixture
-
-Negative case fields:
-
-- id
-- user_prompt_or_scenario
-- expected_safe_behavior
-- reason_not_to_complete
-
-Generated cases remain `review_required: true` until inspected or executed.
-
-## 8. Evidence bundle
-
-A release evidence bundle SHOULD contain:
-
-```text
-evidence/<release-id>/
-  manifest/
-    plugin.json
-    compatibility-plugin.json
-  inventory/
-    file-tree.txt
-    skills.json
-  evals/
-    test-cases.yaml
-    results.json
-  checks/
-    release-checklist.md
-    validation.json
-  release/
-    release-notes.md
+```json
+{
+  "default_fixture": "Fixture: tests/fixtures/sample.json",
+  "positive": [
+    {
+      "intent_key": "primary-reviewed-workflow",
+      "user_prompt": "Run the documented workflow on the sample fixture.",
+      "expected_behavior": "Use the intended Skill and preserve the supplied constraints.",
+      "expected_result_shape": "A structured user-facing result.",
+      "fixture": "Fixture: tests/fixtures/sample.json"
+    }
+  ],
+  "negative": [
+    {
+      "intent_key": "reviewed-boundary",
+      "user_prompt_or_scenario": "Ask for an unsupported irreversible action.",
+      "expected_safe_behavior": "Do not execute it without the required safety gate.",
+      "reason_not_to_complete": "The request crosses a documented safety boundary."
+    }
+  ]
+}
 ```
 
-Evidence claims use:
+All compiled cases remain `generated` and `review_required`, even when their text came from metadata.
 
-- `generated`
-- `inspected`
-- `executed`
-
-The factory MUST NOT upgrade one evidence state to another without proof.
-
-## 9. Safety rules
+## 8. Safety rules
 
 The factory MUST NOT:
 
-- fabricate successful test results,
-- mark a generated case as executed,
-- infer a privacy or legal URL that does not exist,
-- invent publisher identity,
-- hide destructive or open-world behavior,
-- include secrets/tokens/private fixtures in evidence bundles,
-- claim a local-only dependency is publicly available,
-- mutate source candidates during scanning,
-- overwrite a differing manifest without explicit force.
+- fabricate successful test execution
+- label generated review material as inspected or executed
+- silently declare fixtures unnecessary
+- fabricate reviewer credentials or test accounts
+- reveal detected secrets in evidence
+- hide a risk-derived negative case to make a candidate look safer
+- write evidence outside the candidate root
+- overwrite differing evidence without explicit force
 
-## 10. Milestones
+## 9. Milestones
 
 ### MPF-M0.0 Skeleton
 
@@ -405,36 +366,31 @@ Status: complete.
 
 Status: complete.
 
-Acceptance satisfied:
-
-- generates root portable `plugin.json`
-- validates supported Agent Plugins `$schema`
-- validates kebab-case identity
-- emits OpenAI interface metadata under `extensions.com.openai`
-- optionally emits a compatibility `.codex-plugin/plugin.json`
-- does not treat compatibility output as canonical
-- dry-run is the default
-- invalid output is not written
-- overwrite requires explicit force
-- output is deterministic
-
 ### MPF-M0.3 Submission Eval Compiler
 
-Acceptance:
+Status: complete.
 
-- outputs 5 positive and 3 negative cases
-- no duplicate intents
-- generated cases remain review-required
+Acceptance satisfied:
+
+- emits exactly 5 positive and 3 negative cases
+- validates required submission fields
+- deduplicates normalized prompts and intent keys
+- all generated cases remain review-required
 - fixture references are supported
-- cases can consume M0.1 risk/missing data and M0.2 manifest metadata
+- missing fixture information becomes a visible blocker
+- M0.1 risk flags feed negative cases
+- M0.2 starter prompts feed positive cases
+- output is deterministic
+- write path stays inside the candidate root
+- overwrite requires explicit force
 
 ### MPF-M0.4 Local Marketplace Bridge
 
 Acceptance:
 
-- generated plugin can be referenced by a repo or personal marketplace
-- marketplace path stays relative and inside its root
-- install test is recorded as evidence, never assumed
+- generated plugin can be referenced by a local/repo marketplace
+- install path remains relative and inside its root
+- actual install result is recorded as executed evidence
 
 ### MPF-M0.5 Submission Evidence Bundle
 
@@ -442,17 +398,16 @@ Acceptance:
 
 - one command produces a versioned evidence directory
 - every claim is tagged generated, inspected, or executed
-- missing publication/legal metadata prevents submission-ready status
+- unreviewed eval cases prevent submission-ready status
+- missing publication/legal material prevents submission-ready status
 
-## 11. North star
-
-The product is not a plugin generator.
-
-The product is a **release-confidence compiler**:
+## 10. North star
 
 ```text
 "I have a useful Skill"
         ->
 "I have a plugin artifact whose structure, behavior,
-metadata, tests, risks, and release evidence I can explain."
+metadata, tests, risks, review state, and evidence I can explain."
 ```
+
+MADO Plugin Factory is a **release-confidence compiler**.
