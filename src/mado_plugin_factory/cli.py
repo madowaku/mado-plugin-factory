@@ -5,6 +5,13 @@ import json
 import sys
 from pathlib import Path
 
+from .evals import (
+    DEFAULT_OUTPUT,
+    EvalError,
+    compile_submission_evals,
+    load_eval_metadata,
+    write_submission_evals,
+)
 from .manifest import ManifestError, compile_manifest, load_metadata, write_compiled_manifest
 from .scanner import ScanError, scan_candidate
 
@@ -40,6 +47,18 @@ def build_parser() -> argparse.ArgumentParser:
     manifest.add_argument("--write", action="store_true", help="Write compiled manifest files to the candidate")
     manifest.add_argument("--force", action="store_true", help="Allow --write to replace differing manifest files")
     manifest.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
+
+    evals = sub.add_parser("evals", help="Compile submission positive/negative test cases")
+    evals.add_argument("path", nargs="?", default=".", help="Candidate directory (default: .)")
+    evals.add_argument("--metadata", type=Path, help="JSON eval metadata and reviewer fixtures")
+    evals.add_argument(
+        "--output",
+        default=DEFAULT_OUTPUT,
+        help=f"Relative evidence output path (default: {DEFAULT_OUTPUT})",
+    )
+    evals.add_argument("--write", action="store_true", help="Write the generated eval report")
+    evals.add_argument("--force", action="store_true", help="Allow --write to replace a differing eval report")
+    evals.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
     return parser
 
 
@@ -50,6 +69,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_scan(args)
     if args.command == "manifest":
         return _run_manifest(args)
+    if args.command == "evals":
+        return _run_evals(args)
     return 1
 
 
@@ -83,6 +104,25 @@ def _run_manifest(args: argparse.Namespace) -> int:
                 force=args.force,
             )
     except (ManifestError, ScanError) as exc:
+        _print_error(str(exc))
+        return 1
+
+    _print_json(report, pretty=args.pretty)
+    return 0 if report["validation"]["valid"] else 2
+
+
+def _run_evals(args: argparse.Namespace) -> int:
+    try:
+        metadata = load_eval_metadata(args.metadata) if args.metadata else {}
+        report = compile_submission_evals(Path(args.path), metadata=metadata)
+        if args.write:
+            report["written"] = write_submission_evals(
+                Path(args.path),
+                report,
+                output=args.output,
+                force=args.force,
+            )
+    except (EvalError, ScanError) as exc:
         _print_error(str(exc))
         return 1
 
