@@ -1,0 +1,24 @@
+{
+  "name": "replace-me",
+  "version": "0.1.0",
+  "description": "Replace with the portable plugin description.",
+  "author": {
+    "name": "Replace with publisher name"
+  },
+  "keywords": [
+    "workflow"
+  ],
+  "interface": {
+    "displayName": "Replace Me",
+    "shortDescription": "Short listing copy",
+    "longDescription": "Replace with longer install-surface copy.",
+    "developerName": "Replace with publisher name",
+    "category": "Productivity",
+    "capabilities": [
+      "Workflow"
+    ],
+    "defaultPrompt": [
+      "Use Replace Me for this workflow."
+    ]
+  }
+}
