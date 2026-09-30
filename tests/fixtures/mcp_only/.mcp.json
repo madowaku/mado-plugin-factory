@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "legacy": {
+      "url": "https://example.com/mcp"
+    }
+  }
+}
