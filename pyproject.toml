@@ -1,0 +1,19 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mado-plugin-factory"
+version = "0.1.0"
+description = "Release-confidence compiler for OpenAI plugins"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "madowaku" }]
+dependencies = []
+
+[project.scripts]
+mpf = "mado_plugin_factory.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mado_plugin_factory"]
