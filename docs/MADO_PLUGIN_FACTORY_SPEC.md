@@ -1,12 +1,12 @@
 # MADO_PLUGIN_FACTORY_SPEC.md v0.1
 
-Status: Draft  
+Status: Implementing  
 Project: MADO Plugin Factory  
 Repository: `madowaku/mado-plugin-factory`
 
 ## 1. Purpose
 
-MADO Plugin Factory is a release compiler for reusable agent capabilities.
+MADO Plugin Factory is a release-confidence compiler for reusable agent capabilities.
 
 Its job is to take an existing Skill, workflow, or MCP-backed project and transform it into a plugin artifact that is:
 
@@ -16,48 +16,44 @@ Its job is to take an existing Skill, workflow, or MCP-backed project and transf
 4. evidence-backed,
 5. ready for OpenAI plugin submission work.
 
-The first target is a **skills-only plugin**, because it minimizes infrastructure, auth, and remote-MCP review surface.
+The first optimization target is a **skills-only plugin**, because it minimizes infrastructure, auth, and remote-MCP review surface.
 
 ## 2. Canonical plugin contract
 
-Every generated plugin MUST have:
+For new packages, the canonical portable layout is:
 
 ```text
 <plugin-root>/
-  .codex-plugin/
-    plugin.json
-```
-
-A skills-only plugin SHOULD also have:
-
-```text
-<plugin-root>/
-  .codex-plugin/
-    plugin.json
+  plugin.json
   skills/
     <skill-name>/
       SKILL.md
-```
-
-Only `plugin.json` belongs inside `.codex-plugin/`. Skills, hooks, assets, `.mcp.json`, and `.app.json` live at plugin root when used.
-
-## 3. Minimum manifest
-
-```json
-{
-  "name": "example-plugin",
-  "version": "0.1.0",
-  "description": "A reusable workflow.",
-  "skills": "./skills/"
-}
+  mcp.json                 # optional
+  .codex-plugin/
+    plugin.json             # optional compatibility fallback
 ```
 
 Rules:
 
-- `name` is stable and kebab-case.
-- paths are relative to plugin root.
-- component paths start with `./`.
-- published candidates SHOULD include richer interface metadata before submission.
+- root `plugin.json` is the canonical identity for new Agent Plugins packages.
+- portable packages discover skills from root `skills/`.
+- portable MCP configuration lives at root `mcp.json`.
+- `.codex-plugin/plugin.json` remains a supported compatibility fallback.
+- compatibility MCP configuration may use root `.mcp.json`.
+- OpenAI-specific presentation and registered-app settings belong under `extensions.com.openai` in the portable manifest.
+
+## 3. Minimum portable manifest
+
+```json
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "example-plugin",
+  "version": "0.1.0",
+  "description": "A reusable workflow."
+}
+```
+
+Portable packages do not need a `skills` field to discover root `skills/`.
 
 ## 4. Inputs
 
@@ -81,12 +77,14 @@ Optional:
 
 The scanner identifies:
 - reusable skills
-- MCP dependencies
-- external network dependencies
-- auth requirements
-- destructive actions
-- user-data access
-- fixtures/evidence already present
+- portable and compatibility manifests
+- portable and legacy MCP configuration
+- external package dependencies
+- external network hints
+- auth/secret dependency hints
+- destructive-operation hints
+- user-data-access hints
+- missing packaging metadata
 
 ## 5. Architecture classification
 
@@ -97,45 +95,144 @@ The Candidate Scanner emits one of:
 - `skills_plus_mcp`
 - `not_ready`
 
-M0 optimizes for `skills_only`.
+Classification is based only on actual discovered capability surfaces:
 
-A candidate SHOULD be classified `skills_only` when its useful behavior can be expressed as repeatable instructions/workflows without requiring a dedicated remote tool service.
+- at least one candidate `SKILL.md`
+- at least one configured MCP server
 
-## 6. Compilation pipeline
+Files under documentation, templates, examples, evidence, and test fixture roots are not treated as production Skill surfaces.
+
+## 6. MPF-M0.1 Candidate Scanner
+
+Status: implemented.
+
+### 6.1 CLI
+
+```bash
+mpf scan <candidate-path> --pretty
+```
+
+Optional:
+
+```bash
+mpf scan <candidate-path> --fail-on-not-ready
+```
+
+Exit behavior:
+
+- `0`: scan completed
+- `1`: invalid input / scan error
+- `2`: scan completed but architecture is `not_ready` and `--fail-on-not-ready` was supplied
+
+### 6.2 Output contract
+
+```json
+{
+  "schema_version": "0.1",
+  "source": {
+    "root": "/absolute/path",
+    "scanned_files": 12
+  },
+  "architecture": "skills_only",
+  "architecture_reason": "At least one SKILL.md was detected and no configured MCP server was found.",
+  "skills": [],
+  "components": {
+    "manifest": {
+      "portable": null,
+      "codex_compat": null,
+      "recommended": "plugin.json"
+    },
+    "mcp": {
+      "portable": null,
+      "legacy": null,
+      "configured": false
+    },
+    "apps": {
+      "path": null
+    },
+    "hooks": {
+      "present": false
+    }
+  },
+  "external_dependencies": [],
+  "risk_flags": [],
+  "missing": []
+}
+```
+
+### 6.3 Read-only guarantee
+
+The scanner MUST NOT mutate the source candidate.
+
+Tests compare the candidate file map before and after scanning.
+
+### 6.4 Risk evidence rule
+
+Risk flags are heuristics, not verdicts.
+
+Each risk includes:
+- code
+- severity
+- reason
+- evidence paths
+
+The scanner MUST NOT emit matched secret values or file contents in risk output.
+
+### 6.5 Current risk flags
+
+- `auth_or_secret_dependency`
+- `external_network`
+- `destructive_operation`
+- `user_data_access`
+- `mcp_runtime_dependency`
+
+### 6.6 Missing-state hints
+
+Current missing codes include:
+
+- `no_capability`
+- `portable_manifest_missing`
+- `portable_manifest_invalid`
+- `portable_manifest_schema_missing`
+- `portable_mcp_manifest_invalid`
+- `legacy_mcp_manifest_invalid`
+- `skill_metadata_incomplete`
+
+These are diagnostic hints. Full manifest conformance belongs to MPF-M0.2.
+
+## 7. Compilation pipeline
 
 ```text
 SOURCE
   |
   v
-Candidate Scanner
-  |
-  v
-Capability Contract
+Candidate Scanner                <- M0.1 implemented
   |
   +--> architecture classification
-  +--> risk flags
+  +--> risk flags + evidence paths
+  +--> dependency inventory
   +--> missing metadata
   |
   v
-Manifest Compiler
+Manifest Compiler                <- M0.2
   |
   v
 Skill Packager
   |
   v
-Submission Eval Compiler
+Submission Eval Compiler         <- M0.3
   |
   +--> 5 positive cases
   +--> 3 negative cases
   |
   v
-Local Validation
+Local Validation                 <- M0.4
   |
   v
-Evidence Bundle
+Evidence Bundle                  <- M0.5
 ```
 
-## 7. Submission eval contract
+## 8. Submission eval contract
 
 Each release candidate MUST include at least five positive and three negative cases.
 
@@ -154,11 +251,11 @@ Each release candidate MUST include at least five positive and three negative ca
 - expected_safe_behavior
 - reason_not_to_complete
 
-Generation is allowed. Blind generation is not.
+Generation is allowed. Blind promotion is not.
 
 The compiler MUST mark generated cases `review_required: true` until a human or deterministic validator confirms they match actual plugin behavior.
 
-## 8. Evidence bundle
+## 9. Evidence bundle
 
 A release evidence bundle SHOULD contain:
 
@@ -186,7 +283,7 @@ For MCP plugins, later milestones add:
 - auth behavior
 - privacy/data-flow notes
 
-## 9. Safety rules
+## 10. Safety rules
 
 The factory MUST NOT:
 
@@ -195,46 +292,38 @@ The factory MUST NOT:
 - infer a privacy policy URL that does not exist,
 - silently omit destructive or open-world behavior,
 - include secrets, tokens, private fixtures, or auth material in evidence bundles,
-- convert a local-only dependency into a claim of public availability.
+- convert a local-only dependency into a claim of public availability,
+- mutate source repositories during candidate scanning.
 
-## 10. Milestones
+## 11. Milestones
 
 ### MPF-M0.0 Skeleton
 
-Acceptance:
-- repo has canonical docs and templates
-- manifest template uses `.codex-plugin/plugin.json`
-- submission eval template contains 5 positive and 3 negative slots
-- release checklist distinguishes generated vs verified evidence
+Status: complete.
 
 ### MPF-M0.1 Candidate Scanner
 
-Input:
-- local/repo Skill tree metadata
-
-Output:
-```json
-{
-  "architecture": "skills_only",
-  "skills": [],
-  "external_dependencies": [],
-  "risk_flags": [],
-  "missing": []
-}
-```
+Status: complete.
 
 Acceptance:
-- deterministic scan result
-- no mutation of source repo
-- reason for architecture classification is recorded
+- deterministic architecture classification
+- source repo is not mutated
+- architecture reason is recorded
+- portable + compatibility packaging surfaces are distinguished
+- risk flags include evidence paths without exposing secret values
+- fixture/template Skills do not create production capability false positives
+- CLI supports machine-readable JSON
+- unit tests cover all four architecture states
 
 ### MPF-M0.2 Manifest Compiler
 
 Acceptance:
-- compiles minimal valid manifest
-- validates kebab-case name
-- validates `./` component paths
-- rejects missing `.codex-plugin/plugin.json` destination contract
+- generates root portable `plugin.json`
+- validates Agent Plugins `$schema`
+- validates kebab-case identity
+- emits OpenAI interface metadata under `extensions.com.openai`
+- can optionally emit a compatibility `.codex-plugin/plugin.json`
+- never treats compatibility output as the canonical portable source
 
 ### MPF-M0.3 Submission Eval Compiler
 
@@ -247,8 +336,7 @@ Acceptance:
 ### MPF-M0.4 Local Marketplace Bridge
 
 Acceptance:
-- generated plugin can be referenced by a repo-scoped or personal marketplace catalog
-- marketplace path is relative and `./`-prefixed
+- generated plugin can be referenced by a local or repo marketplace
 - install test is recorded as evidence, not assumed
 
 ### MPF-M0.5 Submission Evidence Bundle
@@ -258,7 +346,7 @@ Acceptance:
 - every claim is tagged as generated, inspected, or executed
 - missing publication/legal metadata blocks "submission-ready" status
 
-## 11. North star
+## 12. North star
 
 The product is not a plugin generator.
 
