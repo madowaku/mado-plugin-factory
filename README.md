@@ -10,7 +10,7 @@ Convert an existing project or skill into a reproducible plugin release bundle:
 Skill / Repo
   -> Candidate Scan
   -> Plugin Contract
-  -> .codex-plugin/plugin.json
+  -> plugin.json
   -> Skills / MCP wiring
   -> Positive + Negative eval cases
   -> Listing + legal checklist
@@ -18,51 +18,106 @@ Skill / Repo
   -> Submission evidence bundle
 ```
 
-## M0 scope
+## Current status
 
-M0 focuses on the safest, smallest release path: **skills-only plugins**.
+- **MPF-M0.0 Skeleton** ✅
+- **MPF-M0.1 Candidate Scanner** ✅
+- MPF-M0.2 Manifest Compiler
+- MPF-M0.3 Submission Eval Compiler
+- MPF-M0.4 Local Marketplace Bridge
+- MPF-M0.5 Submission Evidence Bundle
 
-Deliverables:
+## Candidate Scanner
 
-- canonical plugin folder skeleton
-- submission contract
-- 5 positive + 3 negative test-case template
-- release evidence checklist
-- local marketplace readiness notes
+The scanner is read-only. It inspects a candidate directory and emits a deterministic JSON report with:
+
+- architecture: `skills_only`, `mcp_only`, `skills_plus_mcp`, or `not_ready`
+- architecture reason
+- discovered skills
+- portable and compatibility manifest state
+- portable and legacy MCP state
+- external dependencies
+- risk flags with evidence paths
+- missing release requirements
+
+Run it without installation:
+
+```bash
+PYTHONPATH=src python -m mado_plugin_factory scan /path/to/candidate --pretty
+```
+
+Or install the package and use:
+
+```bash
+mpf scan /path/to/candidate --pretty
+```
+
+Use `--fail-on-not-ready` to return exit code 2 for a candidate with no discovered Skill or configured MCP server.
+
+## Plugin packaging contract
+
+New plugins SHOULD use the portable Agent Plugins layout:
+
+```text
+my-plugin/
+  plugin.json
+  skills/
+    my-skill/
+      SKILL.md
+  mcp.json              # optional
+  .codex-plugin/
+    plugin.json          # optional compatibility fallback
+```
+
+The root `plugin.json` is canonical for new packages. Portable packages discover `skills/` automatically. A root `mcp.json` uses the Agent Plugins MCP schema and `mcpServers`.
+
+The older `.codex-plugin/plugin.json` + `.mcp.json` layout remains supported as a compatibility path, and the scanner recognizes both.
+
+## M0.1 output example
+
+```json
+{
+  "architecture": "skills_only",
+  "architecture_reason": "At least one SKILL.md was detected and no configured MCP server was found.",
+  "skills": [
+    {
+      "name": "hello",
+      "description": "Greet a user using a deterministic workflow.",
+      "path": "skills/hello/SKILL.md",
+      "has_frontmatter": true
+    }
+  ],
+  "risk_flags": [],
+  "missing": []
+}
+```
+
+## Tests
+
+```bash
+PYTHONPATH=src python -m unittest discover -s tests -v
+```
+
+The fixture suite currently covers:
+
+- skills-only
+- skills + portable MCP
+- legacy MCP-only
+- not-ready candidates
+- source immutability
+- template/fixture false-positive suppression
+- CLI JSON and exit behavior
 
 ## Source of truth
 
-Implementation should track the current OpenAI Plugins documentation, especially:
+Implementation tracks the current OpenAI Plugins documentation:
 
 - Package your plugin: https://developers.openai.com/plugins/build/plugins
+- Build skills: https://developers.openai.com/plugins/build/skills
 - Submit plugins: https://developers.openai.com/plugins/deploy/submission
-
-## Layout
-
-```text
-docs/
-  MADO_PLUGIN_FACTORY_SPEC.md
-templates/
-  skills-only/
-    .codex-plugin/
-      plugin.json
-    skills/
-      example/
-        SKILL.md
-  submission/
-    test-cases.yaml
-    release-checklist.md
-```
-
-## Milestones
-
-- **MPF-M0.0 Skeleton**: repository contract and templates
-- **MPF-M0.1 Candidate Scanner**: inspect an existing Skill/repo and classify plugin architecture
-- **MPF-M0.2 Manifest Compiler**: generate and validate `.codex-plugin/plugin.json`
-- **MPF-M0.3 Submission Eval Compiler**: generate/review 5 positive + 3 negative cases
-- **MPF-M0.4 Local Marketplace Bridge**: make generated plugins installable from a local marketplace
-- **MPF-M0.5 Submission Evidence Bundle**: produce a review-ready release package
 
 ## Design rule
 
 Do not optimize first for "publishing a plugin." Optimize for a deterministic transformation from a known-good Skill into a reviewable, testable, reproducible plugin artifact.
+
+The product is a **release-confidence compiler**.
