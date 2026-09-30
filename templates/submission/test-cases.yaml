@@ -1,43 +1,77 @@
-version: 1
+version: 3
 review_required: true
+evidence_state: generated
+submission_ready: false
 
 positive:
   - id: P1
+    intent_key: ""
     user_prompt: ""
     expected_behavior: ""
     expected_result_shape: ""
     fixture: ""
+    source: ""
+    evidence_state: generated
+    review_required: true
   - id: P2
+    intent_key: ""
     user_prompt: ""
     expected_behavior: ""
     expected_result_shape: ""
     fixture: ""
+    source: ""
+    evidence_state: generated
+    review_required: true
   - id: P3
+    intent_key: ""
     user_prompt: ""
     expected_behavior: ""
     expected_result_shape: ""
     fixture: ""
+    source: ""
+    evidence_state: generated
+    review_required: true
   - id: P4
+    intent_key: ""
     user_prompt: ""
     expected_behavior: ""
     expected_result_shape: ""
     fixture: ""
+    source: ""
+    evidence_state: generated
+    review_required: true
   - id: P5
+    intent_key: ""
     user_prompt: ""
     expected_behavior: ""
     expected_result_shape: ""
     fixture: ""
+    source: ""
+    evidence_state: generated
+    review_required: true
 
 negative:
   - id: N1
+    intent_key: ""
     user_prompt_or_scenario: ""
     expected_safe_behavior: ""
     reason_not_to_complete: ""
+    source: ""
+    evidence_state: generated
+    review_required: true
   - id: N2
+    intent_key: ""
     user_prompt_or_scenario: ""
     expected_safe_behavior: ""
     reason_not_to_complete: ""
+    source: ""
+    evidence_state: generated
+    review_required: true
   - id: N3
+    intent_key: ""
     user_prompt_or_scenario: ""
     expected_safe_behavior: ""
     reason_not_to_complete: ""
+    source: ""
+    evidence_state: generated
+    review_required: true
