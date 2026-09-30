@@ -4,15 +4,13 @@ MADO Plugin Factory turns reusable Skills and MCP-backed workflows into submissi
 
 ## Goal
 
-Convert an existing project or skill into a reproducible plugin release bundle:
-
 ```text
 Skill / Repo
   -> Candidate Scan
   -> Manifest Compile
   -> Submission Eval Compile
-  -> Local marketplace validation
-  -> Submission evidence bundle
+  -> Local Marketplace Bridge
+  -> Submission Evidence Bundle
 ```
 
 ## Current status
@@ -21,26 +19,18 @@ Skill / Repo
 - **MPF-M0.1 Candidate Scanner** ✅
 - **MPF-M0.2 Manifest Compiler** ✅
 - **MPF-M0.3 Submission Eval Compiler** ✅
-- MPF-M0.4 Local Marketplace Bridge
+- **MPF-M0.4 Local Marketplace Bridge** ✅
 - MPF-M0.5 Submission Evidence Bundle
 
-## MPF-M0.1 Candidate Scanner
-
-The scanner is read-only and emits deterministic JSON describing:
-
-- architecture: `skills_only`, `mcp_only`, `skills_plus_mcp`, or `not_ready`
-- discovered Skills and packaging surfaces
-- external dependencies
-- risk flags with evidence paths
-- missing release requirements
+## M0.1 Candidate Scanner
 
 ```bash
 mpf scan /path/to/candidate --pretty
 ```
 
-## MPF-M0.2 Manifest Compiler
+The scanner is read-only. It classifies the candidate, inventories Skills/MCP/dependencies, and emits risk flags with evidence paths.
 
-The manifest compiler creates the portable root `plugin.json`.
+## M0.2 Manifest Compiler
 
 ```bash
 mpf manifest /path/to/candidate \
@@ -48,33 +38,9 @@ mpf manifest /path/to/candidate \
   --write
 ```
 
-Compilation is a dry-run unless `--write` is supplied. A differing existing manifest is protected unless `--force` is explicit.
+The portable root `plugin.json` is canonical. Compilation is dry-run by default and differing output requires `--force`.
 
-OpenAI install-surface metadata is emitted under:
-
-```text
-extensions.com.openai.interface
-```
-
-An optional compatibility mirror can be generated with `--compat`.
-
-## MPF-M0.3 Submission Eval Compiler
-
-The eval compiler turns the candidate's Skills, manifest starter prompts, and scanner risk signals into reviewer-facing test-case drafts.
-
-```bash
-mpf evals /path/to/candidate --pretty
-```
-
-Provide reviewed fixture/test-account context with:
-
-```bash
-mpf evals /path/to/candidate \
-  --metadata ./eval-metadata.json \
-  --pretty
-```
-
-Write the evidence artifact only after validation:
+## M0.3 Submission Eval Compiler
 
 ```bash
 mpf evals /path/to/candidate \
@@ -82,139 +48,125 @@ mpf evals /path/to/candidate \
   --write
 ```
 
-Default output:
+It compiles exactly five positive and three negative reviewer drafts. Generated cases stay `review_required: true` and `evidence_state: generated`.
 
-```text
-evidence/evals/test-cases.json
+## M0.4 Local Marketplace Bridge
+
+M0.4 turns a validated plugin package into a repo marketplace entry that ChatGPT desktop / Codex can discover.
+
+Dry-run:
+
+```bash
+mpf marketplace bridge /path/to/plugin \
+  --root /path/to/marketplace-root \
+  --pretty
 ```
 
-Use `--output <relative-path>` to change the evidence location and `--force` to replace a differing existing report.
+Write the bridge:
 
-### Eval contract
+```bash
+mpf marketplace bridge /path/to/plugin \
+  --root /path/to/marketplace-root \
+  --write
+```
 
-The compiler targets exactly:
+The bridge stages only distributable plugin files into:
 
-- 5 positive cases
-- 3 negative cases
+```text
+<marketplace-root>/
+  .agents/plugins/marketplace.json
+  plugins/
+    <plugin-name>/
+      plugin.json
+      skills/
+      mcp.json              # optional
+      .mcp.json             # optional compatibility
+      .app.json             # optional
+      hooks/                # optional
+      assets/               # optional
+      .codex-plugin/
+        plugin.json         # optional compatibility
+```
 
-Positive cases contain:
+The marketplace entry points at:
 
-- `id`
-- `intent_key`
-- `user_prompt`
-- `expected_behavior`
-- `expected_result_shape`
-- `fixture`
-- `source`
-- `evidence_state`
-- `review_required`
+```text
+./plugins/<plugin-name>
+```
 
-Negative cases contain:
+Paths must remain relative to the marketplace root.
 
-- `id`
-- `intent_key`
-- `user_prompt_or_scenario`
-- `expected_safe_behavior`
-- `reason_not_to_complete`
-- `source`
-- `evidence_state`
-- `review_required`
+The bridge preserves unrelated existing plugin entries in the same catalog. A differing staged plugin or marketplace catalog is not replaced unless `--force` is explicit.
 
-### Evidence discipline
+### Install verification
 
-M0.3 deliberately does **not** mark generated test cases as submission-ready.
+Writing the catalog is **not** treated as proof that ChatGPT installed the plugin.
 
-Every compiled case starts as:
+After restarting ChatGPT desktop and installing from the local marketplace, verify the actual installed cache copy:
+
+```bash
+mpf marketplace verify /path/to/plugin \
+  --root /path/to/marketplace-root \
+  --pretty
+```
+
+By default, M0.4 checks:
+
+```text
+~/.codex/plugins/cache/<marketplace-name>/<plugin-name>/local/
+```
+
+The verifier checks:
+
+- marketplace catalog validity
+- expected plugin entry
+- staged package presence
+- installed cache directory
+- installed `plugin.json`
+- plugin identity
+- SHA-256 package digest equality between staged and installed copies
+
+Only an exact cache match returns:
 
 ```json
 {
-  "evidence_state": "generated",
-  "review_required": true
+  "evidence_state": "executed",
+  "install_verified": true,
+  "blocking_reasons": []
 }
 ```
 
-The top-level report therefore starts with:
+A missing cache, invalid installed manifest, or stale installed copy is also recorded as executed evidence, but `install_verified` remains false.
 
-```json
-{
-  "submission_ready": false,
-  "blocking_reasons": [
-    "generated_cases_require_review"
-  ]
-}
+Persist the verification:
+
+```bash
+mpf marketplace verify /path/to/plugin \
+  --root /path/to/marketplace-root \
+  --write-evidence
 ```
 
-If no fixture/test-account information is provided, positive cases contain a visible `REVIEW REQUIRED` fixture placeholder and add `fixture_data_requires_review` as a blocker.
-
-The compiler never silently assumes that no fixture is needed.
-
-### Positive case sources
-
-Candidate generation priority is deterministic:
-
-1. explicit cases from eval metadata
-2. `extensions.com.openai.interface.defaultPrompt`
-3. discovered Skill name/description pairs
-4. deterministic valid-workflow focus cases
-
-Duplicate normalized prompts and duplicate intent keys are removed before the final five cases are selected.
-
-### Negative case sources
-
-Explicit negative cases are used first.
-
-Scanner risk signals then generate boundary cases for:
-
-- authentication / secret exposure
-- destructive operations
-- user-data disclosure
-- unrelated external network access
-- fabricated MCP success
-
-If fewer than three risk-derived cases exist, deterministic generic boundary cases fill the remainder:
-
-- out-of-scope work
-- missing required context
-- fabricated execution success
-
-See `templates/evals/metadata.json` for reviewer-supplied fixture and case overrides.
-
-## Portable plugin packaging
-
-New packages target:
+Default evidence path:
 
 ```text
-my-plugin/
-  plugin.json
-  skills/
-    my-skill/
-      SKILL.md
-  mcp.json                 # optional portable MCP
-  .codex-plugin/
-    plugin.json             # optional compatibility mirror
+evidence/marketplace/install-verification.json
 ```
 
-The root `plugin.json` is canonical.
+The evidence output cannot escape the plugin root.
 
-## Safety and determinism
+### Why the cache check matters
 
-The factory separates evidence into:
+For local marketplace plugins, ChatGPT installs a copy under `~/.codex/plugins/cache/` and loads that installed copy rather than the marketplace source directory directly. M0.4 therefore verifies the cache copy instead of assuming catalog visibility equals successful installation.
+
+## Evidence discipline
+
+The factory uses:
 
 - `generated`
 - `inspected`
 - `executed`
 
-Current guarantees:
-
-- scanning does not mutate source candidates
-- manifest compilation is dry-run by default
-- differing manifest replacement requires `--force`
-- eval compilation is dry-run by default
-- generated evals remain review-required
-- no fixture requirement is silently waived
-- evidence output cannot escape the candidate root
-- differing eval evidence replacement requires `--force`
-- deterministic inputs produce deterministic reports
+A stronger evidence state is never claimed without corresponding proof.
 
 ## Tests
 
@@ -222,18 +174,19 @@ Current guarantees:
 PYTHONPATH=src python -m unittest discover -s tests -v
 ```
 
-The suite covers Scanner, Manifest Compiler, and Submission Eval Compiler behavior including:
+Coverage includes:
 
-- all four architecture states
-- portable/compatibility manifest behavior
+- candidate architecture scanning
+- portable/compatibility manifest compilation
+- 5/3 submission eval generation
+- marketplace catalog generation
+- package staging filters
+- existing-catalog merge
 - overwrite protection
-- exact 5/3 eval counts
-- manifest starter-prompt ingestion
-- risk-derived negative cases
-- fixture review blockers
-- duplicate prompt suppression
-- evidence path safety
-- deterministic output
+- missing-cache verification
+- exact installed-cache verification
+- stale-cache detection
+- evidence path containment
 - CLI dry-run behavior
 
 ## Source of truth
@@ -249,6 +202,6 @@ Implementation tracks:
 
 Do not optimize first for "publishing a plugin."
 
-Optimize for a deterministic transformation from a known-good Skill into a reviewable, testable, reproducible plugin artifact.
+Optimize for a deterministic transformation from a known-good Skill into a reviewable, testable, install-verifiable plugin artifact.
 
 The product is a **release-confidence compiler**.
