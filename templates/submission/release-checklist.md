@@ -2,88 +2,88 @@
 
 ## Structure
 
-- [ ] Root `plugin.json` exists for the portable Agent Plugins package.
-- [ ] Root `plugin.json` declares the supported Agent Plugins `$schema`.
-- [ ] Plugin name is stable and kebab-case.
-- [ ] Skills are under `skills/<name>/SKILL.md`.
-- [ ] Root `mcp.json` uses the portable Agent Plugins MCP schema when bundled MCP is used.
-- [ ] Any `.codex-plugin/plugin.json` is an optional compatibility mirror, not the canonical portable manifest.
+- [ ] Root `plugin.json` exists.
+- [ ] Portable schema and plugin identity validate.
+- [ ] Skills and optional MCP/app/hook/assets surfaces are intentional.
+- [ ] Compatibility output, if present, is not treated as canonical.
 
 ## Candidate scan
 
-- [ ] `mpf scan` completed successfully.
-- [ ] Architecture classification is expected.
-- [ ] Architecture reason was reviewed.
-- [ ] External dependencies were reviewed.
-- [ ] Risk flags and evidence paths were reviewed.
+- [ ] `mpf scan` completed.
+- [ ] Architecture is expected.
+- [ ] Dependencies and risk flags were reviewed.
 - [ ] Source candidate remained unmodified.
 
 ## Manifest compile
 
-- [ ] `mpf manifest` completed with `validation.valid: true`.
-- [ ] Portable `plugin.json` is canonical.
-- [ ] `extensions.com.openai.interface.displayName` is present.
-- [ ] `extensions.com.openai.interface.shortDescription` is present and single-line.
-- [ ] Package-level validation errors are empty.
-- [ ] Final-directory warnings were reviewed.
-- [ ] Publisher identity and legal URLs were supplied rather than invented.
-- [ ] Component/asset paths stay inside the plugin root.
-- [ ] Compatibility output does not invent a legacy MCP path.
-- [ ] Existing manifests were not overwritten without explicit `--force`.
+- [ ] `mpf manifest` reports `validation.valid: true`.
+- [ ] OpenAI install-surface metadata was reviewed.
+- [ ] Legal/publisher metadata was supplied rather than invented.
+- [ ] Existing manifest replacement used explicit `--force` when needed.
 
 ## Submission eval compile
 
-- [ ] `mpf evals` completed with `validation.valid: true`.
 - [ ] Exactly five positive cases exist.
 - [ ] Exactly three negative cases exist.
-- [ ] Positive prompts are unique after normalization.
-- [ ] Negative scenarios are unique after normalization.
-- [ ] Intent keys are unique.
-- [ ] Every positive case has prompt, expected behavior, result shape, and fixture/test-account field.
-- [ ] Every negative case has scenario, safe behavior, and reason not to complete.
-- [ ] Scanner risk flags were compared with negative-case coverage.
-- [ ] Manifest starter prompts were compared with positive-case coverage.
-- [ ] Any `REVIEW REQUIRED` fixture placeholders were resolved.
-- [ ] Generated cases still say `evidence_state: generated`.
-- [ ] Generated cases still say `review_required: true`.
-- [ ] No generated eval has been mislabeled as executed.
-- [ ] Evidence output stayed inside the candidate root.
-- [ ] Existing eval evidence was not overwritten without explicit `--force`.
+- [ ] Prompts/scenarios and intent keys are unique.
+- [ ] Fixtures/test-account requirements are reproducible.
+- [ ] Generated cases remain `generated` and `review_required: true`.
+- [ ] Scanner risks are represented in negative-case review.
+
+## Local marketplace bridge
+
+- [ ] `mpf marketplace bridge` reports a valid catalog.
+- [ ] Marketplace id and display name are intentional.
+- [ ] Entry source is `./plugins/<plugin-name>`.
+- [ ] Source path stays inside marketplace root.
+- [ ] `policy.installation`, `policy.authentication`, and `category` are present.
+- [ ] Staged package contains only distributable plugin surfaces.
+- [ ] No symlinked plugin content was staged.
+- [ ] Existing unrelated marketplace entries were preserved.
+- [ ] Differing staged/catalog content was not overwritten without explicit `--force`.
+
+## Local install verification
+
+- [ ] ChatGPT desktop was restarted after marketplace changes.
+- [ ] Plugin was installed from the intended local marketplace.
+- [ ] `mpf marketplace verify` was run after installation.
+- [ ] Marketplace catalog was valid at verification time.
+- [ ] Matching plugin entry existed.
+- [ ] Installed cache directory existed.
+- [ ] Installed portable manifest was valid.
+- [ ] Installed plugin identity matched.
+- [ ] Staged and installed package digests matched.
+- [ ] `install_verified: true`.
+- [ ] Install verification evidence was saved when needed.
+- [ ] A stale/different cache copy was not accepted as success.
 
 ## Human review
 
-- [ ] Each positive case is realistic and reproducible without internal context.
-- [ ] Each negative case exercises a genuine boundary for this plugin.
-- [ ] Test accounts/fixtures are reviewer-accessible.
-- [ ] Authenticated review fixtures require no MFA, SMS, email confirmation, or private-network access.
-- [ ] Results were manually inspected or actually executed before any evidence-state promotion.
+- [ ] Positive cases are realistic and reproducible.
+- [ ] Negative cases exercise genuine boundaries.
+- [ ] Reviewer fixtures/accounts need no MFA, SMS, email confirmation, or private-network access when applicable.
+- [ ] Evidence-state promotion is supported by actual inspection/execution.
 
 ## Publication metadata
 
-- [ ] Display name is final.
-- [ ] Short and long descriptions are final.
+- [ ] Display name and descriptions are final.
 - [ ] Starter prompts are realistic.
-- [ ] Website URL is real and reachable when required.
-- [ ] Support path is defined.
-- [ ] Privacy policy exists when required.
-- [ ] Terms of service exist when required.
-- [ ] Availability countries/regions are selected.
-- [ ] Release notes are prepared.
+- [ ] Website/support/privacy/terms requirements are satisfied.
+- [ ] Availability and release notes are ready.
 
 ## MCP checks, when applicable
 
-- [ ] Every MCP tool has accurate `readOnlyHint`.
-- [ ] Every MCP tool has accurate `openWorldHint`.
-- [ ] Every MCP tool has accurate `destructiveHint`.
-- [ ] No tool response leaks secrets, debug payloads, unnecessary identifiers, or undisclosed personal data.
-- [ ] Public endpoint and domain ownership requirements are satisfied.
+- [ ] Tool annotations are accurate.
+- [ ] Auth/data-flow behavior is documented.
+- [ ] No tool response leaks secrets or unnecessary personal data.
+- [ ] Endpoint/domain requirements are satisfied.
 
 ## Evidence state
 
-For every checked item, record one of:
+Allowed states:
 
 - `generated`
 - `inspected`
 - `executed`
 
-A submission candidate MUST NOT claim a stronger evidence state than the available proof supports.
+A stronger state MUST NOT be claimed without corresponding proof.
