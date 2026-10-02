@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import queue
@@ -128,6 +129,18 @@ def run_extension_runtime_smoke(
         and not host_required
     )
 
+    tool_observations = sorted(
+        (_tool_observation(tool) for tool in runtime["tools"]),
+        key=lambda item: item.get("name") or "",
+    )
+    fingerprint = _runtime_fingerprint(
+        protocol_version=runtime["protocol_version"],
+        era=runtime["era"],
+        discover=runtime["discover"],
+        tools=tool_observations,
+        resources=runtime["resource_observations"],
+    )
+
     smoke_id = _smoke_id(
         server_name,
         runtime["protocol_version"],
@@ -158,9 +171,11 @@ def run_extension_runtime_smoke(
         "observations": {
             "tool_count": len(runtime["tools"]),
             "tool_names": runtime["tool_names"],
+            "tools": tool_observations,
             "resource_uris": runtime["resource_uris"],
             "resources": runtime["resource_observations"],
         },
+        "runtime_fingerprint": fingerprint,
         "expected_extensions": expected,
         "extension_checks": checks,
         "verified_extensions": verified,
@@ -859,10 +874,13 @@ def _resource_observation(
             "mcp_app": False,
             "mime_types": [],
             "openai_ui": {},
+            "content_count": 0,
+            "content_sha256": None,
         }
     mime_types = []
     openai_ui: dict[str, Any] = {}
     mcp_app = False
+    fingerprint_items: list[dict[str, Any]] = []
     for item in contents:
         if not isinstance(item, dict):
             continue
@@ -876,12 +894,109 @@ def _resource_observation(
             candidate = meta.get("openai/ui")
             if isinstance(candidate, dict):
                 openai_ui.update(candidate)
+        fingerprint_items.append(
+            {
+                "uri": item.get("uri"),
+                "mimeType": mime,
+                "text": item.get("text"),
+                "blob": item.get("blob"),
+                "openai_ui": (
+                    meta.get("openai/ui")
+                    if isinstance(meta, dict)
+                    and isinstance(meta.get("openai/ui"), dict)
+                    else {}
+                ),
+            }
+        )
     return {
         "ok": True,
         "mcp_app": mcp_app,
         "mime_types": sorted(set(mime_types)),
         "openai_ui": openai_ui,
+        "content_count": len(fingerprint_items),
+        "content_sha256": _json_sha256(fingerprint_items),
     }
+
+
+def _tool_observation(
+    tool: dict[str, Any],
+) -> dict[str, Any]:
+    meta = _tool_meta(tool)
+    safe_meta: dict[str, Any] = {}
+    for key in (
+        "ui",
+        "openai/ui",
+        "openai/extensions",
+        "openai/toolInvocation",
+        "securitySchemes",
+    ):
+        value = meta.get(key)
+        if value is not None:
+            safe_meta[key] = value
+    observation: dict[str, Any] = {
+        "name": tool.get("name"),
+        "title": tool.get("title"),
+        "description": tool.get("description"),
+        "inputSchema": tool.get("inputSchema"),
+        "outputSchema": tool.get("outputSchema"),
+        "annotations": tool.get("annotations"),
+        "securitySchemes": tool.get("securitySchemes"),
+        "_meta": safe_meta,
+    }
+    return {
+        key: value
+        for key, value in observation.items()
+        if value is not None
+    }
+
+
+def _runtime_fingerprint(
+    *,
+    protocol_version: str,
+    era: str,
+    discover: dict[str, Any],
+    tools: list[dict[str, Any]],
+    resources: list[dict[str, Any]],
+) -> dict[str, Any]:
+    capabilities = discover.get("capabilities")
+    if not isinstance(capabilities, dict):
+        capabilities = {}
+    protocol_payload = {
+        "version": protocol_version,
+        "era": era,
+    }
+    components = {
+        "protocol_sha256": _json_sha256(protocol_payload),
+        "capabilities_sha256": _json_sha256(capabilities),
+        "tools_sha256": _json_sha256(tools),
+        "resources_sha256": _json_sha256(resources),
+    }
+    surface = {
+        "protocol": protocol_payload,
+        "capabilities": capabilities,
+        "tools": tools,
+        "resources": resources,
+    }
+    return {
+        "schema_version": "0.1",
+        "sha256": _json_sha256(surface),
+        "components": components,
+        "counts": {
+            "tools": len(tools),
+            "resources": len(resources),
+        },
+    }
+
+
+def _json_sha256(value: Any) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
 
 
 def _server_info(
@@ -963,8 +1078,6 @@ def _smoke_id(
     tool_names: list[str],
     resource_uris: list[str],
 ) -> str:
-    import hashlib
-
     payload = {
         "server": server_name,
         "protocol": protocol,

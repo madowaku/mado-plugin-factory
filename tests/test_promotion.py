@@ -19,6 +19,7 @@ from mado_plugin_factory.orchestrator import (
 from mado_plugin_factory.promotion import (
     PromotionError,
     compile_verification_promotion,
+    run_verification_promotion,
     public_promotion_report,
     write_promoted_release,
 )
@@ -691,6 +692,36 @@ class VerificationPromotionGateTests(unittest.TestCase):
             self.assertNotIn(
                 "_verification_artifacts",
                 public,
+            )
+
+    def test_live_promotion_blocks_remote_mcp_drift(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "plugin"
+            _make_plugin(root, host_required=False)
+            _make_release_evidence(root)
+            dossier = _verification(
+                root,
+                host_required=False,
+            )
+
+            server = root / "server.py"
+            server.write_text(
+                server.read_text(encoding="utf-8").replace(
+                    '"name": "app.open",',
+                    '"name": "app.open.changed",',
+                ),
+                encoding="utf-8",
+            )
+
+            report = run_verification_promotion(
+                root,
+                release_metadata=_release_metadata(),
+                verification_evidence=dossier,
+            )
+            self.assertFalse(report["promotion_ready"])
+            self.assertIn(
+                "verification_freshness_stale",
+                report["blocking_reasons"],
             )
 
     def test_cli_promotes_verified_release(self):
