@@ -5,6 +5,7 @@ import json
 import sys
 from pathlib import Path
 
+from .behavior import CanaryError, run_behavior_canary
 from .capture import (
     HostCaptureError,
     normalize_host_capture,
@@ -328,6 +329,19 @@ def build_parser() -> argparse.ArgumentParser:
     verify.add_argument("--force", action="store_true", help="Replace differing evidence output")
     verify.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
 
+    canary = sub.add_parser("canary", help="Record or replay read-only MCP behavioral contracts")
+    canary.add_argument("path", nargs="?", default=".", help="Plugin candidate directory")
+    canary.add_argument("--contract", required=True, help="Relative behavioral canary contract JSON")
+    canary.add_argument("--baseline", help="Relative recorded canary evidence for replay; omit to record a baseline")
+    canary.add_argument("--verification-evidence", help="Relative verified M1.2 dossier to bind the canary baseline/replay")
+    canary.add_argument("--server", help="MCP server name; falls back to contract/default server")
+    canary.add_argument("--mode", default="auto", choices=["auto", "modern", "legacy"], help="MCP protocol era preference (default: auto)")
+    canary.add_argument("--timeout", type=float, default=5.0, help="Per-request MCP timeout in seconds (default: 5)")
+    canary.add_argument("--write-evidence", action="store_true", help="Persist baseline/replay canary evidence")
+    canary.add_argument("--evidence-output", help="Relative canary evidence output path")
+    canary.add_argument("--force", action="store_true", help="Replace differing canary evidence")
+    canary.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
+
     freshness = sub.add_parser("freshness", help="Re-probe MCP runtime and compare with an M1.2 verification baseline")
     freshness.add_argument("path", nargs="?", default=".", help="Plugin candidate directory")
     freshness.add_argument("--verification-evidence", required=True, help="Relative M1.2 dossier.json path")
@@ -361,7 +375,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     promote.add_argument("--server", help="MCP server name; defaults to the server recorded by verification")
     promote.add_argument("--runtime-mode", default="auto", choices=["auto", "modern", "legacy"], help="Freshness probe protocol era preference (default: auto)")
-    promote.add_argument("--timeout", type=float, default=5.0, help="Per-request freshness probe timeout in seconds (default: 5)")
+    promote.add_argument("--timeout", type=float, default=5.0, help="Per-request freshness/canary timeout in seconds (default: 5)")
+    promote.add_argument("--canary-contract", help="Relative behavioral canary contract JSON; requires --canary-baseline")
+    promote.add_argument("--canary-baseline", help="Relative recorded M1.5 canary baseline; requires --canary-contract")
     promote.add_argument("--output", help="Relative release directory; defaults to evidence/releases/<plugin-version>")
     promote.add_argument("--write", action="store_true", help="Write promoted release bundle plus verification bridge evidence")
     promote.add_argument("--force", action="store_true", help="Replace differing release/promotion artifacts")
@@ -418,6 +434,8 @@ def main(argv: list[str] | None = None) -> int:
             return _run_marketplace_bridge(args)
         if args.marketplace_command == "verify":
             return _run_marketplace_verify(args)
+    if args.command == "canary":
+        return _run_canary(args)
     if args.command == "freshness":
         return _run_freshness(args)
     if args.command == "promote":
@@ -703,6 +721,30 @@ def _run_marketplace_verify(args: argparse.Namespace) -> int:
     return 0 if report["install_verified"] else 2
 
 
+def _run_canary(args: argparse.Namespace) -> int:
+    try:
+        report = run_behavior_canary(
+            Path(args.path),
+            contract=args.contract,
+            baseline_evidence=args.baseline,
+            verification_evidence=args.verification_evidence,
+            server=args.server,
+            mode=args.mode,
+            timeout=args.timeout,
+            write_evidence=args.write_evidence,
+            evidence_output=args.evidence_output,
+            force=args.force,
+        )
+    except CanaryError as exc:
+        _print_error(str(exc))
+        return 1
+
+    _print_json(report, pretty=args.pretty)
+    if report["mode"] == "record":
+        return 0 if report["canary_passed"] else 2
+    return 0 if report["canary_verified"] else 2
+
+
 def _run_freshness(args: argparse.Namespace) -> int:
     try:
         report = run_verification_freshness(
@@ -736,6 +778,8 @@ def _run_promote(args: argparse.Namespace) -> int:
             server=args.server,
             runtime_mode=args.runtime_mode,
             timeout=args.timeout,
+            canary_contract=args.canary_contract,
+            canary_baseline=args.canary_baseline,
         )
         if args.write:
             report["write_result"] = write_promoted_release(

@@ -8,6 +8,7 @@ import unittest
 import zipfile
 from pathlib import Path
 
+from mado_plugin_factory.behavior import run_behavior_canary
 from mado_plugin_factory.evals import (
     compile_submission_evals,
     write_submission_evals,
@@ -28,6 +29,8 @@ from mado_plugin_factory.promotion import (
 SERVER = r'''
 import json
 import sys
+
+BEHAVIOR = "v1"
 
 def send(value):
     sys.stdout.write(json.dumps(value) + "\n")
@@ -79,6 +82,20 @@ for line in sys.stdin:
                         "inputSchema": {"type": "object", "properties": {}}
                     },
                     {
+                        "name": "canary.read",
+                        "description": "Read deterministic promotion canary.",
+                        "inputSchema": {"type": "object", "properties": {}},
+                        "outputSchema": {
+                            "type": "object",
+                            "properties": {"status": {"type": "string"}}
+                        },
+                        "annotations": {
+                            "readOnlyHint": True,
+                            "openWorldHint": False,
+                            "destructiveHint": False
+                        }
+                    },
+                    {
                         "name": "app.open",
                         "inputSchema": {"type": "object", "properties": {}},
                         "_meta": {
@@ -91,6 +108,24 @@ for line in sys.stdin:
                 ]
             }
         })
+    elif method == "tools/call":
+        params = msg.get("params") or {}
+        if params.get("name") == "canary.read":
+            send({
+                "jsonrpc": "2.0",
+                "id": ident,
+                "result": {
+                    "content": [{"type": "text", "text": "canary"}],
+                    "structuredContent": {"status": BEHAVIOR},
+                    "isError": False
+                }
+            })
+        else:
+            send({
+                "jsonrpc": "2.0",
+                "id": ident,
+                "error": {"code": -32601, "message": "Method not found"}
+            })
     elif method == "resources/read":
         uri = (msg.get("params") or {}).get("uri")
         send({
@@ -345,6 +380,42 @@ def _capture(path: Path, *, attested: bool = True) -> None:
         ),
         encoding="utf-8",
     )
+
+
+
+def _canary_baseline(root: Path, dossier: str) -> tuple[str, str]:
+    contract = root / "canary-contract.json"
+    contract.write_text(
+        json.dumps(
+            {
+                "server": "fixture",
+                "cases": [
+                    {
+                        "id": "promotion-canary",
+                        "tool": "canary.read",
+                        "arguments": {},
+                        "expect": {
+                            "outcome": "success",
+                            "structured_content": "required",
+                            "content_types": ["text"]
+                        },
+                        "stable_paths": ["$.status"]
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    report = run_behavior_canary(
+        root,
+        contract="canary-contract.json",
+        verification_evidence=dossier,
+        write_evidence=True,
+    )
+    if not report["canary_passed"]:
+        raise AssertionError(report)
+    return "canary-contract.json", report["evidence_output"]
+
 
 
 def _verification(
@@ -721,6 +792,50 @@ class VerificationPromotionGateTests(unittest.TestCase):
             self.assertFalse(report["promotion_ready"])
             self.assertIn(
                 "verification_freshness_stale",
+                report["blocking_reasons"],
+            )
+
+    def test_behavior_drift_blocks_live_promotion_after_freshness_passes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "plugin"
+            _make_plugin(root, host_required=False)
+            _make_release_evidence(root)
+            dossier = _verification(
+                root,
+                host_required=False,
+            )
+            contract, baseline = _canary_baseline(root, dossier)
+
+            server = root / "server.py"
+            server.write_text(
+                server.read_text(encoding="utf-8").replace(
+                    'BEHAVIOR = "v1"',
+                    'BEHAVIOR = "v2"',
+                ),
+                encoding="utf-8",
+            )
+
+            report = run_verification_promotion(
+                root,
+                release_metadata=_release_metadata(),
+                verification_evidence=dossier,
+                canary_contract=contract,
+                canary_baseline=baseline,
+            )
+
+            self.assertFalse(report["promotion_ready"])
+            self.assertTrue(
+                report["verification"]["freshness"][
+                    "freshness_verified"
+                ]
+            )
+            self.assertFalse(
+                report["verification"]["behavior_canary"][
+                    "canary_verified"
+                ]
+            )
+            self.assertIn(
+                "verification_behavior_canary_stale",
                 report["blocking_reasons"],
             )
 

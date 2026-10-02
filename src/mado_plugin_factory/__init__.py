@@ -1,5 +1,6 @@
 """MADO Plugin Factory."""
 
+from .behavior import run_behavior_canary
 from .capture import normalize_host_capture
 from .bundle import compile_submission_bundle
 from .evals import compile_submission_evals, validate_submission_evals
@@ -22,6 +23,7 @@ from .scaffold import compile_extension_scaffold
 __all__ = [
     "compile_extension_capabilities",
     "normalize_host_capture",
+    "run_behavior_canary",
     "compile_extension_scaffold",
     "compile_extension_patch",
     "run_extension_runtime_smoke",
@@ -41,4 +43,4 @@ __all__ = [
     "validate_submission_evals",
     "verify_marketplace_install",
 ]
-__version__ = "1.4.0"
+__version__ = "1.5.0"

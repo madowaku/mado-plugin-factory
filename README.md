@@ -20,6 +20,7 @@ Skill / Repo
   -> MPF-M1.2 Extension Verification Orchestrator
   -> MPF-M1.3 Verification Promotion Gate / Release Bundle Bridge
   -> MPF-M1.4 Verification Freshness / Remote MCP Drift Gate
+  -> MPF-M1.5 Behavioral Contract Replay / Remote MCP Canary
 ```
 
 ## Status
@@ -39,8 +40,9 @@ Skill / Repo
 - **MPF-M1.2 Extension Verification Orchestrator** ✅
 - **MPF-M1.3 Verification Promotion Gate / Release Bundle Bridge** ✅
 - **MPF-M1.4 Verification Freshness / Remote MCP Drift Gate** ✅
+- **MPF-M1.5 Behavioral Contract Replay / Remote MCP Canary** ✅
 
-Current package version: `1.4.0`.
+Current package version: `1.5.0`.
 
 ## M0.1 Candidate Scanner
 
@@ -592,6 +594,64 @@ evidence/freshness/extensions/<freshness-id>.json
 
 The drift report identifies changed fingerprint components plus added/removed tool names and resource URIs. Its scope is deliberately `advertised_mcp_surface`: it detects metadata/resource drift, but does not claim unchanged business behavior or authorization enforcement.
 
+## M1.5 Behavioral Contract Replay / Remote MCP Canary
+
+M1.5 executes explicit, deterministic **read-only** MCP canaries so a server can fail promotion even when its advertised metadata is unchanged.
+
+Start from:
+
+```text
+templates/canary/contract.json
+```
+
+Record a behavioral baseline:
+
+```bash
+mpf canary /path/to/plugin \
+  --contract ./canary-contract.json \
+  --verification-evidence evidence/verifications/extensions/<verification-id>/dossier.json \
+  --write-evidence \
+  --pretty
+```
+
+Replay it later:
+
+```bash
+mpf canary /path/to/plugin \
+  --contract ./canary-contract.json \
+  --baseline evidence/canary/extensions/<canary-id>.json \
+  --verification-evidence evidence/verifications/extensions/<verification-id>/dossier.json \
+  --pretty
+```
+
+Only tools that explicitly advertise `annotations.readOnlyHint=true` are callable. M1.5 refuses every other tool **before** sending `tools/call`.
+
+Canary contracts declare representative fixture inputs and expectations for success/tool-error/protocol-error behavior. Evidence never stores raw arguments or raw tool results. It stores:
+
+- argument SHA-256
+- success/tool-error/protocol-error class
+- protocol error code
+- returned content types
+- structuredContent type/shape
+- SHA-256 values for explicitly declared `stable_paths`
+
+A baseline may be bound to a verified M1.2 dossier. Promotion requires that binding when a behavioral canary is enabled, so a baseline from another verification run cannot be reused accidentally.
+
+Behavioral promotion is opt-in because safe deterministic fixture calls are product-specific:
+
+```bash
+mpf promote /path/to/plugin \
+  --release-metadata ./release.json \
+  --verification-evidence evidence/verifications/extensions/<verification-id>/dossier.json \
+  --canary-contract ./canary-contract.json \
+  --canary-baseline evidence/canary/extensions/<baseline-id>.json \
+  --write
+```
+
+Promotion then requires both M1.4 runtime freshness and M1.5 behavioral replay. A handler-only change that leaves tool descriptors and UI resources identical can therefore produce `verification_behavior_canary_stale`.
+
+The M1.5 scope is deliberately `read_only_behavior_contract`. It does not auto-execute write/destructive tools and does not claim exhaustive authorization or business-semantic coverage.
+
 ## Evidence states
 
 The factory uses only:
@@ -608,7 +668,7 @@ A stronger evidence state is never claimed without corresponding proof or explic
 PYTHONPATH=src python -m unittest discover -s tests -v
 ```
 
-Coverage includes the full M0.1-M1.4 pipeline, including deterministic ZIP generation, bundle overwrite safety, MCP-specific submission blockers, local install evidence, path containment, and secret-bearing metadata rejection.
+Coverage includes the full M0.1-M1.5 pipeline, including deterministic ZIP generation, bundle overwrite safety, MCP-specific submission blockers, local install evidence, path containment, and secret-bearing metadata rejection.
 
 ## Source of truth
 

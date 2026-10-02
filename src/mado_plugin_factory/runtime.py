@@ -40,6 +40,10 @@ class RuntimeSmokeError(ValueError):
     pass
 
 
+class UnsafeCanaryToolError(RuntimeSmokeError):
+    pass
+
+
 def run_extension_runtime_smoke(
     root: Path,
     *,
@@ -203,6 +207,240 @@ def run_extension_runtime_smoke(
             force=force,
         )
     return result
+
+
+
+def execute_mcp_tool_canary(
+    root: Path,
+    *,
+    tool_name: str,
+    arguments: dict[str, Any],
+    server: str | None = None,
+    mode: str = "auto",
+    timeout: float = DEFAULT_TIMEOUT,
+) -> dict[str, Any]:
+    """Execute one MCP tool call for behavioral contract replay."""
+    root = root.expanduser().resolve()
+    if not root.exists() or not root.is_dir():
+        raise RuntimeSmokeError(
+            f"candidate path is not a directory: {root}"
+        )
+    if mode not in {"auto", "modern", "legacy"}:
+        raise RuntimeSmokeError(
+            "mode must be auto, modern, or legacy"
+        )
+    if timeout <= 0:
+        raise RuntimeSmokeError(
+            "timeout must be greater than zero"
+        )
+    if not isinstance(tool_name, str) or not tool_name.strip():
+        raise RuntimeSmokeError(
+            "tool_name must be a non-empty string"
+        )
+    if not isinstance(arguments, dict):
+        raise RuntimeSmokeError(
+            "tool arguments must be an object"
+        )
+
+    _manifest_path, config = _load_mcp_config(root)
+    server_name, declaration = _select_server(
+        config,
+        server,
+    )
+    transport = _transport_kind(declaration)
+
+    if transport == "stdio":
+        observed = _call_tool_stdio(
+            root,
+            declaration,
+            tool_name=tool_name,
+            arguments=arguments,
+            mode=mode,
+            timeout=timeout,
+        )
+    elif transport == "streamable-http":
+        observed = _call_tool_http(
+            declaration,
+            tool_name=tool_name,
+            arguments=arguments,
+            mode=mode,
+            timeout=timeout,
+        )
+    else:
+        raise RuntimeSmokeError(
+            f"unsupported MCP transport: {transport}"
+        )
+
+    return {
+        "server": server_name,
+        "transport": transport,
+        **observed,
+    }
+
+
+def _call_tool_stdio(
+    root: Path,
+    declaration: dict[str, Any],
+    *,
+    tool_name: str,
+    arguments: dict[str, Any],
+    mode: str,
+    timeout: float,
+) -> dict[str, Any]:
+    if mode in {"auto", "modern"}:
+        client = _StdioClient(root, declaration, timeout)
+        try:
+            discover = client.request(
+                "server/discover",
+                {},
+                modern=True,
+            )
+            if "result" in discover:
+                return _execute_tool_with_client(
+                    client,
+                    tool_name=tool_name,
+                    arguments=arguments,
+                    protocol_version=MODERN_PROTOCOL,
+                    era="modern",
+                    modern=True,
+                )
+            if mode == "modern":
+                raise RuntimeSmokeError(
+                    "server/discover failed: "
+                    + _rpc_error_text(discover)
+                )
+        finally:
+            client.close()
+
+    client = _StdioClient(root, declaration, timeout)
+    try:
+        initialize = client.request(
+            "initialize",
+            {
+                "protocolVersion": LEGACY_PROTOCOL,
+                "capabilities": {},
+                "clientInfo": {
+                    "name": "mado-plugin-factory",
+                    "version": "1.5.0",
+                },
+            },
+            modern=False,
+        )
+        if "result" not in initialize:
+            raise RuntimeSmokeError(
+                "initialize failed: "
+                + _rpc_error_text(initialize)
+            )
+        client.notify("notifications/initialized")
+        result = initialize["result"]
+        negotiated = result.get("protocolVersion")
+        if not isinstance(negotiated, str):
+            negotiated = LEGACY_PROTOCOL
+        return _execute_tool_with_client(
+            client,
+            tool_name=tool_name,
+            arguments=arguments,
+            protocol_version=negotiated,
+            era="legacy",
+            modern=False,
+        )
+    finally:
+        client.close()
+
+
+def _call_tool_http(
+    declaration: dict[str, Any],
+    *,
+    tool_name: str,
+    arguments: dict[str, Any],
+    mode: str,
+    timeout: float,
+) -> dict[str, Any]:
+    if mode == "legacy":
+        raise RuntimeSmokeError(
+            "legacy streamable-http is not supported by M1.5"
+        )
+    client = _ModernHttpClient(declaration, timeout)
+    discover = client.request(
+        "server/discover",
+        {},
+        modern=True,
+    )
+    if "result" not in discover:
+        raise RuntimeSmokeError(
+            "server/discover failed: "
+            + _rpc_error_text(discover)
+        )
+    return _execute_tool_with_client(
+        client,
+        tool_name=tool_name,
+        arguments=arguments,
+        protocol_version=MODERN_PROTOCOL,
+        era="modern",
+        modern=True,
+    )
+
+
+def _execute_tool_with_client(
+    client: Any,
+    *,
+    tool_name: str,
+    arguments: dict[str, Any],
+    protocol_version: str,
+    era: str,
+    modern: bool,
+) -> dict[str, Any]:
+    tools_message = client.request(
+        "tools/list",
+        {},
+        modern=modern,
+    )
+    if "result" not in tools_message:
+        raise RuntimeSmokeError(
+            "tools/list failed: "
+            + _rpc_error_text(tools_message)
+        )
+    raw_tools = tools_message["result"].get("tools", [])
+    tools = [
+        item
+        for item in raw_tools
+        if isinstance(item, dict)
+    ] if isinstance(raw_tools, list) else []
+    descriptor = next(
+        (
+            item
+            for item in tools
+            if item.get("name") == tool_name
+        ),
+        None,
+    )
+    if descriptor is None:
+        raise RuntimeSmokeError(
+            f"MCP tool not found: {tool_name}"
+        )
+    annotations = descriptor.get("annotations")
+    if not (
+        isinstance(annotations, dict)
+        and annotations.get("readOnlyHint") is True
+    ):
+        raise UnsafeCanaryToolError(
+            f"canary refuses tool without annotations.readOnlyHint=true: {tool_name}"
+        )
+
+    message = client.request(
+        "tools/call",
+        {
+            "name": tool_name,
+            "arguments": arguments,
+        },
+        modern=modern,
+    )
+    return {
+        "protocol_version": protocol_version,
+        "era": era,
+        "descriptor": descriptor,
+        "message": message,
+    }
 
 
 def _load_mcp_config(root: Path) -> tuple[Path, dict[str, Any]]:
