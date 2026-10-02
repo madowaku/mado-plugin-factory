@@ -45,6 +45,12 @@ from .marketplace import (
     write_install_evidence,
     write_marketplace_bridge,
 )
+from .orchestrator import (
+    VerificationOrchestratorError,
+    public_verification_report,
+    run_extension_verification,
+    write_verification_dossier,
+)
 from .patch import (
     DEFAULT_SCAFFOLD as DEFAULT_PATCH_SCAFFOLD,
     PatchError,
@@ -145,6 +151,45 @@ def build_parser() -> argparse.ArgumentParser:
     runtime_smoke.add_argument("--evidence-output", help="Relative runtime evidence output path")
     runtime_smoke.add_argument("--force", action="store_true", help="Replace differing evidence output")
     runtime_smoke.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
+
+    verify_extensions = sub.add_parser("verify-extensions", help="Orchestrate runtime, capture, replay, and verification dossier")
+    verify_extensions.add_argument("path", nargs="?", default=".", help="Candidate directory (default: .)")
+    verify_extensions.add_argument("--server", help="MCP server name when multiple servers are configured")
+    verify_extensions.add_argument(
+        "--runtime-mode",
+        default="auto",
+        choices=["auto", "modern", "legacy"],
+        help="MCP runtime protocol era preference (default: auto)",
+    )
+    verify_extensions.add_argument(
+        "--timeout",
+        type=float,
+        default=5.0,
+        help="Per-request MCP timeout in seconds (default: 5)",
+    )
+    verify_extensions.add_argument("--capture", type=Path, help="Raw or normalized ChatGPT host capture; omit to stop at runtime verification")
+    verify_extensions.add_argument(
+        "--capture-format",
+        default="auto",
+        choices=["auto", "json", "jsonl", "normalized"],
+        help="Host capture adapter format (default: auto)",
+    )
+    verify_extensions.add_argument(
+        "--surface",
+        choices=["web", "desktop", "ios", "android", "api_playground"],
+        help="ChatGPT surface for --capture",
+    )
+    verify_extensions.add_argument(
+        "--capture-mode",
+        choices=["developer_mode", "installed_plugin", "api_playground"],
+        help="ChatGPT capture mode for --capture",
+    )
+    verify_extensions.add_argument("--executed", action="store_true", help="Attest that the supplied capture came from an executed session")
+    verify_extensions.add_argument("--attest-chatgpt-capture", action="store_true", help="Explicitly attest that the supplied capture came from ChatGPT")
+    verify_extensions.add_argument("--output-dir", help="Relative verification dossier directory")
+    verify_extensions.add_argument("--write", action="store_true", help="Write the verification dossier and stage artifacts")
+    verify_extensions.add_argument("--force", action="store_true", help="Replace differing dossier artifacts")
+    verify_extensions.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
 
     host_capture = sub.add_parser("host-capture", help="Normalize captured ChatGPT host logs for replay")
     host_capture.add_argument("path", nargs="?", default=".", help="Candidate directory (default: .)")
@@ -311,6 +356,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_patch(args)
     if args.command == "runtime-smoke":
         return _run_runtime_smoke(args)
+    if args.command == "verify-extensions":
+        return _run_verify_extensions(args)
     if args.command == "host-capture":
         return _run_host_capture(args)
     if args.command == "host-replay":
@@ -424,6 +471,42 @@ def _run_runtime_smoke(args: argparse.Namespace) -> int:
     if report["runtime_verified"]:
         return 0
     if report["runtime_smoke_passed"]:
+        return 3
+    return 2
+
+
+def _run_verify_extensions(args: argparse.Namespace) -> int:
+    try:
+        report = run_extension_verification(
+            Path(args.path),
+            server=args.server,
+            runtime_mode=args.runtime_mode,
+            timeout=args.timeout,
+            capture_input=args.capture,
+            capture_format=args.capture_format,
+            surface=args.surface,
+            capture_mode=args.capture_mode,
+            executed=args.executed,
+            attest_chatgpt_capture=args.attest_chatgpt_capture,
+            output_dir=args.output_dir,
+        )
+        if args.write:
+            report["written"] = write_verification_dossier(
+                Path(args.path),
+                report,
+                force=args.force,
+            )
+    except VerificationOrchestratorError as exc:
+        _print_error(str(exc))
+        return 1
+
+    _print_json(public_verification_report(report), pretty=args.pretty)
+    if report["verification_verified"]:
+        return 0
+    if report["verification_state"] in {
+        "awaiting_host_capture",
+        "awaiting_capture_attestation",
+    }:
         return 3
     return 2
 
