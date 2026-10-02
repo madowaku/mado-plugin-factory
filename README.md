@@ -16,6 +16,7 @@ Skill / Repo
   -> MPF-M0.8 Extension Apply / Patch Engine
   -> MPF-M0.9 Extension Runtime Smoke / Evidence
   -> MPF-M1.0 ChatGPT Host Replay / Extension Acceptance
+  -> MPF-M1.1 Host Trace Capture / Normalizer
 ```
 
 ## Status
@@ -31,8 +32,9 @@ Skill / Repo
 - **MPF-M0.8 Extension Apply / Patch Engine** ✅
 - **MPF-M0.9 Extension Runtime Smoke / Evidence** ✅
 - **MPF-M1.0 ChatGPT Host Replay / Extension Acceptance** ✅
+- **MPF-M1.1 Host Trace Capture / Normalizer** ✅
 
-Current package version: `1.0.0`.
+Current package version: `1.1.0`.
 
 ## M0.1 Candidate Scanner
 
@@ -427,6 +429,37 @@ Default output:
 evidence/host/extensions/<acceptance-id>.json
 ```
 
+## M1.1 Host Trace Capture / Normalizer
+
+M1.1 converts observed ChatGPT/API Playground logs into the privacy-reduced trace contract consumed by M1.0.
+
+```bash
+mpf host-capture /path/to/plugin \\
+  --input ./raw-host-log.json \\
+  --surface web \\
+  --mode developer_mode \\
+  --executed \\
+  --attest-chatgpt-capture \\
+  --write \\
+  --pretty
+```
+
+Supported adapters are `auto`, `json`, `jsonl`, and `normalized`. Generic JSON adapters understand direct normalized events, arrays/record containers, JSON-RPC request/response pairs, and sequential JSON-RPC request/response records.
+
+M1.1 canonicalizes call IDs and removes sensitive values before writing the normalized trace. Deep-link paths become hash-bearing redacted paths; Model-App Context text/structured content is replaced with shape-only placeholders; update IDs are hashed; form messages, schemas, and submitted content are reduced to the minimum shape needed by M1.0.
+
+Default output:
+
+```text
+evidence/host/captures/<capture-id>/
+  trace.json
+  capture.json
+```
+
+`trace.json` is the M1.0 input. `capture.json` records the source SHA-256, adapter, record/event counts, redaction counts, capture provenance flags, and warnings. The raw input is never copied into evidence.
+
+Capture provenance is explicit. `--attest-chatgpt-capture` is rejected unless `--executed` is also supplied. M1.1 normalization success does not itself grant end-to-end verification; M1.0 remains the acceptance gate.
+
 ## Evidence states
 
 The factory uses only:
@@ -443,7 +476,7 @@ A stronger evidence state is never claimed without corresponding proof or explic
 PYTHONPATH=src python -m unittest discover -s tests -v
 ```
 
-Coverage includes the full M0.1-M1.0 pipeline, including deterministic ZIP generation, bundle overwrite safety, MCP-specific submission blockers, local install evidence, path containment, and secret-bearing metadata rejection.
+Coverage includes the full M0.1-M1.1 pipeline, including deterministic ZIP generation, bundle overwrite safety, MCP-specific submission blockers, local install evidence, path containment, and secret-bearing metadata rejection.
 
 ## Source of truth
 

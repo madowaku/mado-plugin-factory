@@ -1,5 +1,6 @@
 """MADO Plugin Factory."""
 
+from .capture import normalize_host_capture
 from .bundle import compile_submission_bundle
 from .evals import compile_submission_evals, validate_submission_evals
 from .extensions import compile_extension_capabilities
@@ -17,6 +18,7 @@ from .scaffold import compile_extension_scaffold
 
 __all__ = [
     "compile_extension_capabilities",
+    "normalize_host_capture",
     "compile_extension_scaffold",
     "compile_extension_patch",
     "run_extension_runtime_smoke",
@@ -32,4 +34,4 @@ __all__ = [
     "validate_submission_evals",
     "verify_marketplace_install",
 ]
-__version__ = "1.0.0"
+__version__ = "1.1.0"
