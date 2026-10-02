@@ -383,7 +383,7 @@ def _capture(path: Path, *, attested: bool = True) -> None:
 
 
 
-def _canary_baseline(root: Path) -> tuple[str, str]:
+def _canary_baseline(root: Path, dossier: str) -> tuple[str, str]:
     contract = root / "canary-contract.json"
     contract.write_text(
         json.dumps(
@@ -409,6 +409,7 @@ def _canary_baseline(root: Path) -> tuple[str, str]:
     report = run_behavior_canary(
         root,
         contract="canary-contract.json",
+        verification_evidence=dossier,
         write_evidence=True,
     )
     if not report["canary_passed"]:
@@ -803,7 +804,7 @@ class VerificationPromotionGateTests(unittest.TestCase):
                 root,
                 host_required=False,
             )
-            contract, baseline = _canary_baseline(root)
+            contract, baseline = _canary_baseline(root, dossier)
 
             server = root / "server.py"
             server.write_text(
