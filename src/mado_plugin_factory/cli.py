@@ -32,6 +32,7 @@ from .evals import (
     load_eval_metadata,
     write_submission_evals,
 )
+from .freshness import FreshnessError, run_verification_freshness
 from .host import HostReplayError, run_host_replay
 from .manifest import ManifestError, compile_manifest, load_metadata, write_compiled_manifest
 from .marketplace import (
@@ -61,6 +62,7 @@ from .patch import (
 from .promotion import (
     PromotionError,
     compile_verification_promotion,
+    run_verification_promotion,
     public_promotion_report,
     write_promoted_release,
 )
@@ -326,6 +328,17 @@ def build_parser() -> argparse.ArgumentParser:
     verify.add_argument("--force", action="store_true", help="Replace differing evidence output")
     verify.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
 
+    freshness = sub.add_parser("freshness", help="Re-probe MCP runtime and compare with an M1.2 verification baseline")
+    freshness.add_argument("path", nargs="?", default=".", help="Plugin candidate directory")
+    freshness.add_argument("--verification-evidence", required=True, help="Relative M1.2 dossier.json path")
+    freshness.add_argument("--server", help="MCP server name; defaults to the server recorded by verification")
+    freshness.add_argument("--mode", default="auto", choices=["auto", "modern", "legacy"], help="MCP runtime protocol era preference (default: auto)")
+    freshness.add_argument("--timeout", type=float, default=5.0, help="Per-request MCP timeout in seconds (default: 5)")
+    freshness.add_argument("--write-evidence", action="store_true", help="Persist executed freshness evidence")
+    freshness.add_argument("--evidence-output", help="Relative freshness evidence output path")
+    freshness.add_argument("--force", action="store_true", help="Replace differing freshness evidence")
+    freshness.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
+
     promote = sub.add_parser("promote", help="Gate a verified extension run into a release bundle")
     promote.add_argument("path", nargs="?", default=".", help="Plugin candidate directory")
     promote.add_argument("--release-metadata", type=Path, help="JSON release/submission attestations")
@@ -346,6 +359,9 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_INSTALL_EVIDENCE,
         help=f"Relative install evidence path (default: {DEFAULT_INSTALL_EVIDENCE})",
     )
+    promote.add_argument("--server", help="MCP server name; defaults to the server recorded by verification")
+    promote.add_argument("--runtime-mode", default="auto", choices=["auto", "modern", "legacy"], help="Freshness probe protocol era preference (default: auto)")
+    promote.add_argument("--timeout", type=float, default=5.0, help="Per-request freshness probe timeout in seconds (default: 5)")
     promote.add_argument("--output", help="Relative release directory; defaults to evidence/releases/<plugin-version>")
     promote.add_argument("--write", action="store_true", help="Write promoted release bundle plus verification bridge evidence")
     promote.add_argument("--force", action="store_true", help="Replace differing release/promotion artifacts")
@@ -402,6 +418,8 @@ def main(argv: list[str] | None = None) -> int:
             return _run_marketplace_bridge(args)
         if args.marketplace_command == "verify":
             return _run_marketplace_verify(args)
+    if args.command == "freshness":
+        return _run_freshness(args)
     if args.command == "promote":
         return _run_promote(args)
     if args.command == "bundle":
@@ -685,16 +703,39 @@ def _run_marketplace_verify(args: argparse.Namespace) -> int:
     return 0 if report["install_verified"] else 2
 
 
+def _run_freshness(args: argparse.Namespace) -> int:
+    try:
+        report = run_verification_freshness(
+            Path(args.path),
+            verification_evidence=args.verification_evidence,
+            server=args.server,
+            mode=args.mode,
+            timeout=args.timeout,
+            write_evidence=args.write_evidence,
+            evidence_output=args.evidence_output,
+            force=args.force,
+        )
+    except FreshnessError as exc:
+        _print_error(str(exc))
+        return 1
+
+    _print_json(report, pretty=args.pretty)
+    return 0 if report["freshness_verified"] else 2
+
+
 def _run_promote(args: argparse.Namespace) -> int:
     try:
         metadata = load_release_metadata(args.release_metadata) if args.release_metadata else {}
-        report = compile_verification_promotion(
+        report = run_verification_promotion(
             Path(args.path),
             release_metadata=metadata,
             verification_evidence=args.verification_evidence,
             requirement=args.requirement,
             eval_evidence=args.eval_evidence,
             install_evidence=args.install_evidence,
+            server=args.server,
+            runtime_mode=args.runtime_mode,
+            timeout=args.timeout,
         )
         if args.write:
             report["write_result"] = write_promoted_release(
