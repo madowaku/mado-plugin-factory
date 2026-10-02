@@ -45,6 +45,7 @@ from .patch import (
     compile_extension_patch,
     public_patch_report,
 )
+from .runtime import RuntimeSmokeError, run_extension_runtime_smoke
 from .scanner import ScanError, scan_candidate
 from .scaffold import (
     DEFAULT_OUTPUT as DEFAULT_SCAFFOLD_OUTPUT,
@@ -117,6 +118,26 @@ def build_parser() -> argparse.ArgumentParser:
         help="Relative executed evidence path; defaults to evidence/patches/extensions/<patch-id>.json",
     )
     patch.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
+
+    runtime_smoke = sub.add_parser("runtime-smoke", help="Execute MCP runtime extension smoke checks")
+    runtime_smoke.add_argument("path", nargs="?", default=".", help="Candidate directory (default: .)")
+    runtime_smoke.add_argument("--server", help="MCP server name when multiple servers are configured")
+    runtime_smoke.add_argument(
+        "--mode",
+        default="auto",
+        choices=["auto", "modern", "legacy"],
+        help="MCP protocol era preference (default: auto)",
+    )
+    runtime_smoke.add_argument(
+        "--timeout",
+        type=float,
+        default=5.0,
+        help="Per-request timeout in seconds (default: 5)",
+    )
+    runtime_smoke.add_argument("--write-evidence", action="store_true", help="Persist executed runtime smoke evidence")
+    runtime_smoke.add_argument("--evidence-output", help="Relative runtime evidence output path")
+    runtime_smoke.add_argument("--force", action="store_true", help="Replace differing evidence output")
+    runtime_smoke.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
 
     manifest = sub.add_parser("manifest", help="Compile a portable plugin.json manifest")
     manifest.add_argument("path", nargs="?", default=".", help="Candidate directory (default: .)")
@@ -243,6 +264,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_scaffold(args)
     if args.command == "patch":
         return _run_patch(args)
+    if args.command == "runtime-smoke":
+        return _run_runtime_smoke(args)
     if args.command == "manifest":
         return _run_manifest(args)
     if args.command == "evals":
@@ -331,6 +354,29 @@ def _run_patch(args: argparse.Namespace) -> int:
     if args.apply:
         return 0 if report.get("applied") and report.get("post_apply", {}).get("verified") else 2
     return 0 if report["apply_ready"] else 2
+
+
+def _run_runtime_smoke(args: argparse.Namespace) -> int:
+    try:
+        report = run_extension_runtime_smoke(
+            Path(args.path),
+            server=args.server,
+            mode=args.mode,
+            timeout=args.timeout,
+            write_evidence=args.write_evidence,
+            evidence_output=args.evidence_output,
+            force=args.force,
+        )
+    except (RuntimeSmokeError, ExtensionError, ScanError) as exc:
+        _print_error(str(exc))
+        return 1
+
+    _print_json(report, pretty=args.pretty)
+    if report["runtime_verified"]:
+        return 0
+    if report["runtime_smoke_passed"]:
+        return 3
+    return 2
 
 
 def _run_manifest(args: argparse.Namespace) -> int:
