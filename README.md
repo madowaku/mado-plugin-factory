@@ -11,6 +11,7 @@ Skill / Repo
   -> MPF-M0.3 Submission Eval Compiler
   -> MPF-M0.4 Local Marketplace Bridge
   -> MPF-M0.5 Submission Evidence Bundle
+  -> MPF-M0.6 Extension Capability Compiler
 ```
 
 ## Status
@@ -21,8 +22,9 @@ Skill / Repo
 - **MPF-M0.3 Submission Eval Compiler** ✅
 - **MPF-M0.4 Local Marketplace Bridge** ✅
 - **MPF-M0.5 Submission Evidence Bundle** ✅
+- **MPF-M0.6 Extension Capability Compiler** ✅
 
-Current package version: `0.5.0`.
+Current package version: `0.6.0`.
 
 ## M0.1 Candidate Scanner
 
@@ -237,6 +239,39 @@ Existing differing bundle files require `--force`.
 
 The output directory must stay inside the plugin root.
 
+## M0.6 Extension Capability Compiler
+
+M0.6 inspects a plugin for current OpenAI MCP Extension surfaces without claiming runtime success from static code.
+
+Dry-run:
+
+```bash
+mpf extensions /path/to/plugin --pretty
+```
+
+Write inspected evidence:
+
+```bash
+mpf extensions /path/to/plugin --write
+```
+
+Default output:
+
+```text
+evidence/extensions/capabilities.json
+```
+
+Each extension is classified as:
+
+- `detected`: static implementation markers are present
+- `eligible`: prerequisites are present and the surface can be added
+- `needs_input`: implementation is plausible but product-specific input is missing
+- `blocked`: a required MCP, MCP App UI, or packaged Skill prerequisite is missing
+
+The compiler covers sidebar apps, conversation panels, plugin settings, file viewers/editors, display modes, deep links, Model-App Context, composer mentions, rich forms, and plugin onboarding. It also preserves and validates `extensions.com.openai.onboardingSkill` during manifest compilation.
+
+Static detection remains `inspected` evidence with `runtime_verified: false` until a later execution stage proves the feature in ChatGPT.
+
 ## Evidence states
 
 The factory uses only:
@@ -253,7 +288,7 @@ A stronger evidence state is never claimed without corresponding proof or explic
 PYTHONPATH=src python -m unittest discover -s tests -v
 ```
 
-Coverage includes the full M0.1-M0.5 pipeline, including deterministic ZIP generation, bundle overwrite safety, MCP-specific submission blockers, local install evidence, path containment, and secret-bearing metadata rejection.
+Coverage includes the full M0.1-M0.6 pipeline, including deterministic ZIP generation, bundle overwrite safety, MCP-specific submission blockers, local install evidence, path containment, and secret-bearing metadata rejection.
 
 ## Source of truth
 
@@ -263,6 +298,8 @@ Implementation tracks current OpenAI plugin documentation:
 - https://developers.openai.com/plugins/build/skills
 - https://developers.openai.com/plugins/deploy/submission
 - https://developers.openai.com/plugins/deploy/submission-errors
+- https://developers.openai.com/plugins/build/extensions
+- https://github.com/openai/mcp-extensions/blob/main/docs/spec.md
 
 ## Design rule
 

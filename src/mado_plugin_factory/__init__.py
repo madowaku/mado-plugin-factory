@@ -2,6 +2,7 @@
 
 from .bundle import compile_submission_bundle
 from .evals import compile_submission_evals, validate_submission_evals
+from .extensions import compile_extension_capabilities
 from .manifest import compile_manifest, validate_manifest
 from .marketplace import (
     compile_marketplace_bridge,
@@ -11,6 +12,7 @@ from .marketplace import (
 from .scanner import scan_candidate
 
 __all__ = [
+    "compile_extension_capabilities",
     "compile_manifest",
     "compile_marketplace_bridge",
     "compile_submission_bundle",
@@ -21,4 +23,4 @@ __all__ = [
     "validate_submission_evals",
     "verify_marketplace_install",
 ]
-__version__ = "0.5.0"
+__version__ = "0.6.0"

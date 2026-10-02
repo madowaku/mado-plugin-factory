@@ -1,6 +1,6 @@
-# MADO_PLUGIN_FACTORY_SPEC.md v0.5
+# MADO_PLUGIN_FACTORY_SPEC.md v0.6
 
-Status: Implemented through M0.5  
+Status: Implemented through M0.6  
 Project: MADO Plugin Factory  
 Repository: `madowaku/mado-plugin-factory`
 
@@ -25,6 +25,9 @@ Local Marketplace Bridge         <- M0.4 complete
   |
   v
 Submission Evidence Bundle       <- M0.5 complete
+  |
+  v
+Extension Capability Compiler     <- M0.6 complete
 ```
 
 The factory separates "generated", "inspected", and "executed" evidence and refuses to turn missing proof into a release claim.
@@ -360,7 +363,74 @@ M0.5 uses:
 
 No stage may claim a stronger state than its evidence source supports.
 
-## 7. Safety rules
+## 7. MPF-M0.6 Extension Capability Compiler
+
+Status: complete.
+
+### 7.1 Goal
+
+Inspect a plugin candidate against the current OpenAI MCP Extensions contract and answer, per extension surface:
+
+- Is implementation evidence already present?
+- Are the prerequisites present to add it?
+- Is product-specific input still required?
+- What prerequisite blocks it?
+- What protocol or manifest contract should the next implementation step target?
+
+### 7.2 CLI
+
+```bash
+mpf extensions <plugin-root> --pretty
+mpf extensions <plugin-root> --write
+```
+
+Default evidence output:
+
+```text
+evidence/extensions/capabilities.json
+```
+
+### 7.3 Capability states
+
+M0.6 uses four capability states:
+
+- `detected`: static source/manifest markers match the extension contract
+- `eligible`: required architecture is present but no implementation marker was found
+- `needs_input`: architecture is present but product-specific configuration is still missing
+- `blocked`: a required MCP server, MCP App UI, or packaged Skill is absent
+
+A `detected` capability remains `inspected` evidence. It MUST NOT be called runtime-verified.
+
+### 7.4 Covered surfaces
+
+The compiler covers:
+
+- sidebar/global entrypoint
+- conversation/thread entrypoint
+- structured plugin settings
+- file viewer/editor entrypoint
+- display modes
+- deep links
+- Model-App Context
+- composer mentions
+- rich forms / OpenAI elicitation
+- plugin onboarding
+
+### 7.5 Onboarding manifest preservation
+
+The Manifest Compiler preserves an existing `extensions.com.openai.onboardingSkill` or accepts `metadata.onboardingSkill`, validates that the path stays inside the package, and requires it to resolve to a packaged `SKILL.md`.
+
+### 7.6 Evidence discipline
+
+The compiler may identify static markers such as `openai/ui`, `openai/settings`, `mentions/search`, `ui/update-model-context`, and `openai/elicitation`.
+
+It MUST NOT infer that ChatGPT successfully rendered or executed the extension from those markers alone.
+
+### 7.7 Platform-aware notes
+
+The report records the documented platform surface for each extension. File handlers and composer mentions remain desktop-only in the current extension spec, while OpenAI form elicitation is documented for desktop and web. Registered MCP servers also require MCP 2026-07-28 or later with MRTR for form elicitation.
+
+## 8. Safety rules
 
 M0.5 MUST NOT:
 
@@ -375,7 +445,7 @@ M0.5 MUST NOT:
 - write outside the plugin root
 - silently overwrite a differing release bundle
 
-## 8. Acceptance
+## 9. Acceptance
 
 MPF-M0.5 is complete when:
 
@@ -392,7 +462,21 @@ MPF-M0.5 is complete when:
 - evidence creation does not perturb subsequent source scans
 - unit/CI tests cover idempotence and safety boundaries
 
-## 9. North star
+### MPF-M0.6 acceptance
+
+MPF-M0.6 is complete when:
+
+- one command emits a deterministic extension capability report
+- all ten documented extension surfaces are represented
+- static implementation evidence is separated from runtime verification
+- missing MCP/App UI/Skill prerequisites stay explicit
+- file handlers remain input-gated until file extensions are known
+- onboardingSkill is preserved and validated by the Manifest Compiler
+- evidence output stays inside the plugin root and is overwrite-safe
+- scanner output remains stable after writing extension evidence
+- unit/CI tests cover detection, eligibility, blockers, onboarding, path safety, and CLI behavior
+
+## 10. North star
 
 ```text
 "I have a useful Skill"

@@ -13,6 +13,12 @@ from .bundle import (
     load_release_metadata,
     write_submission_bundle,
 )
+from .extensions import (
+    DEFAULT_OUTPUT as DEFAULT_EXTENSION_OUTPUT,
+    ExtensionError,
+    compile_extension_capabilities,
+    write_extension_report,
+)
 from .evals import (
     DEFAULT_OUTPUT,
     EvalError,
@@ -47,6 +53,17 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Exit with status 2 when architecture is not_ready",
     )
+
+    extensions = sub.add_parser("extensions", help="Compile ChatGPT plugin extension capabilities")
+    extensions.add_argument("path", nargs="?", default=".", help="Candidate directory (default: .)")
+    extensions.add_argument(
+        "--output",
+        default=DEFAULT_EXTENSION_OUTPUT,
+        help=f"Relative evidence output path (default: {DEFAULT_EXTENSION_OUTPUT})",
+    )
+    extensions.add_argument("--write", action="store_true", help="Write the inspected extension capability report")
+    extensions.add_argument("--force", action="store_true", help="Replace a differing extension report")
+    extensions.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
 
     manifest = sub.add_parser("manifest", help="Compile a portable plugin.json manifest")
     manifest.add_argument("path", nargs="?", default=".", help="Candidate directory (default: .)")
@@ -167,6 +184,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "scan":
         return _run_scan(args)
+    if args.command == "extensions":
+        return _run_extensions(args)
     if args.command == "manifest":
         return _run_manifest(args)
     if args.command == "evals":
@@ -192,6 +211,24 @@ def _run_scan(args: argparse.Namespace) -> int:
     if args.fail_on_not_ready and result["architecture"] == "not_ready":
         return 2
     return 0
+
+
+def _run_extensions(args: argparse.Namespace) -> int:
+    try:
+        report = compile_extension_capabilities(Path(args.path))
+        if args.write:
+            report["written"] = write_extension_report(
+                Path(args.path),
+                report,
+                output=args.output,
+                force=args.force,
+            )
+    except (ExtensionError, ScanError) as exc:
+        _print_error(str(exc))
+        return 1
+
+    _print_json(report, pretty=args.pretty)
+    return 0 if report["summary"]["actionable_count"] > 0 else 2
 
 
 def _run_manifest(args: argparse.Namespace) -> int:
