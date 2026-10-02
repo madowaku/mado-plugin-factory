@@ -420,14 +420,14 @@ class HostCaptureNormalizerTests(unittest.TestCase):
                 write_host_capture(root, report)
             write_host_capture(root, report, force=True)
 
-            bad = normalize_host_capture(
-                root,
-                source,
-                surface="web",
-                mode="developer_mode",
-                output_dir="../escape",
-            )
-            self.fail("expected output path rejection")
+            with self.assertRaises(HostCaptureError):
+                normalize_host_capture(
+                    root,
+                    source,
+                    surface="web",
+                    mode="developer_mode",
+                    output_dir="../escape",
+                )
 
     def test_public_report_hides_normalized_trace(self):
         with tempfile.TemporaryDirectory() as tmp:
