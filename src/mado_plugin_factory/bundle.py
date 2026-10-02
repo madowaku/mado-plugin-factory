@@ -43,7 +43,8 @@ URL_FIELDS = (
     "terms_url",
 )
 SECRET_KEY_RE = re.compile(
-    r"(password|secret|token|api[_-]?key|credential|authorization|bearer)",
+    r"(^|_)(password|secret|token|api_key|access_token|refresh_token|client_secret|"
+    r"credential_value|authorization|bearer)($|_)",
     re.I,
 )
 
