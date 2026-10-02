@@ -14,6 +14,7 @@ Skill / Repo
   -> MPF-M0.6 Extension Capability Compiler
   -> MPF-M0.7 Extension Scaffold Generator
   -> MPF-M0.8 Extension Apply / Patch Engine
+  -> MPF-M0.9 Extension Runtime Smoke / Evidence
 ```
 
 ## Status
@@ -27,8 +28,9 @@ Skill / Repo
 - **MPF-M0.6 Extension Capability Compiler** ✅
 - **MPF-M0.7 Extension Scaffold Generator** ✅
 - **MPF-M0.8 Extension Apply / Patch Engine** ✅
+- **MPF-M0.9 Extension Runtime Smoke / Evidence** ✅
 
-Current package version: `0.8.0`.
+Current package version: `0.9.0`.
 
 ## M0.1 Candidate Scanner
 
@@ -336,6 +338,39 @@ evidence/patches/extensions/<patch-id>.json
 
 M0.8 distinguishes **source applied** from **runtime verified**. It re-runs M0.6 and requires promoted extension markers to become statically `detected`, while keeping `runtime_verified: false` until a later ChatGPT execution stage proves behavior.
 
+## M0.9 Extension Runtime Smoke / Evidence
+
+M0.9 executes the configured MCP server and collects runtime evidence from the protocol itself.
+
+```bash
+mpf runtime-smoke /path/to/plugin --pretty
+```
+
+Persist the executed evidence:
+
+```bash
+mpf runtime-smoke /path/to/plugin --write-evidence --pretty
+```
+
+For stdio servers, `auto` first probes the modern MCP `2026-07-28` `server/discover` flow and falls back to the legacy initialize flow when needed. Streamable HTTP smoke uses the modern stateless protocol.
+
+The smoke checks direct protocol evidence for sidebar/thread/file entrypoints, structured settings, composer mentions, and display-mode resource metadata. It also reads advertised MCP App resources and verifies `text/html;profile=mcp-app` where entrypoints require an app resource.
+
+Deep links, Model-App Context, and rich-form behavior need ChatGPT host or MCP App interaction, so M0.9 records them as `host_required` instead of inventing success.
+
+Exit codes:
+
+- `0`: directly probeable extension runtime verified
+- `3`: MCP server smoke passed, but host-only extension verification remains
+- `2`: expected runtime metadata is missing
+- `1`: runtime/configuration error
+
+Default evidence path:
+
+```text
+evidence/runtime/extensions/<server>-<smoke-id>.json
+```
+
 ## Evidence states
 
 The factory uses only:
@@ -352,7 +387,7 @@ A stronger evidence state is never claimed without corresponding proof or explic
 PYTHONPATH=src python -m unittest discover -s tests -v
 ```
 
-Coverage includes the full M0.1-M0.8 pipeline, including deterministic ZIP generation, bundle overwrite safety, MCP-specific submission blockers, local install evidence, path containment, and secret-bearing metadata rejection.
+Coverage includes the full M0.1-M0.9 pipeline, including deterministic ZIP generation, bundle overwrite safety, MCP-specific submission blockers, local install evidence, path containment, and secret-bearing metadata rejection.
 
 ## Source of truth
 
