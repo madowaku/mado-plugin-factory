@@ -22,6 +22,7 @@ IGNORED_DIRS = {
     "__pycache__",
     ".mypy_cache",
     ".ruff_cache",
+    "evidence",
 }
 
 TEXT_EXTENSIONS = {
