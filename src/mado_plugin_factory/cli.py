@@ -70,6 +70,7 @@ from .promotion import (
     write_promoted_release,
 )
 from .runtime import RuntimeSmokeError, run_extension_runtime_smoke
+from .security import SecuritySchemeGateError, run_security_scheme_gate
 from .scanner import ScanError, scan_candidate
 from .scaffold import (
     DEFAULT_OUTPUT as DEFAULT_SCAFFOLD_OUTPUT,
@@ -370,6 +371,18 @@ def build_parser() -> argparse.ArgumentParser:
     credential_matrix.add_argument("--force", action="store_true", help="Replace differing credential matrix evidence")
     credential_matrix.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
 
+    security_gate = sub.add_parser("security-gate", help="Compare live securitySchemes with verified credential-matrix scope evidence")
+    security_gate.add_argument("path", nargs="?", default=".", help="Plugin candidate directory")
+    security_gate.add_argument("--contract", required=True, help="Relative least-privilege security contract JSON")
+    security_gate.add_argument("--matrix-evidence", required=True, help="Relative verified M1.7 credential-matrix replay evidence")
+    security_gate.add_argument("--server", help="MCP server name; falls back to contract/default server")
+    security_gate.add_argument("--mode", default="auto", choices=["auto", "modern"], help="MCP protocol era preference (default: auto)")
+    security_gate.add_argument("--timeout", type=float, default=5.0, help="Per-request MCP timeout in seconds (default: 5)")
+    security_gate.add_argument("--write-evidence", action="store_true", help="Persist executed security-scheme gate evidence")
+    security_gate.add_argument("--evidence-output", help="Relative security-scheme evidence output path")
+    security_gate.add_argument("--force", action="store_true", help="Replace differing security-scheme evidence")
+    security_gate.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
+
     freshness = sub.add_parser("freshness", help="Re-probe MCP runtime and compare with an M1.2 verification baseline")
     freshness.add_argument("path", nargs="?", default=".", help="Plugin candidate directory")
     freshness.add_argument("--verification-evidence", required=True, help="Relative M1.2 dossier.json path")
@@ -410,6 +423,7 @@ def build_parser() -> argparse.ArgumentParser:
     promote.add_argument("--negative-baseline", help="Relative recorded M1.6 negative baseline; requires --negative-contract")
     promote.add_argument("--credential-matrix", help="Relative M1.7 credential matrix contract JSON; requires --credential-baseline")
     promote.add_argument("--credential-baseline", help="Relative recorded M1.7 credential matrix baseline; requires --credential-matrix")
+    promote.add_argument("--security-contract", help="Relative M1.8 least-privilege security contract JSON; requires M1.7 credential matrix flags")
     promote.add_argument("--output", help="Relative release directory; defaults to evidence/releases/<plugin-version>")
     promote.add_argument("--write", action="store_true", help="Write promoted release bundle plus verification bridge evidence")
     promote.add_argument("--force", action="store_true", help="Replace differing release/promotion artifacts")
@@ -472,6 +486,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_negative(args)
     if args.command == "credential-matrix":
         return _run_credential_matrix(args)
+    if args.command == "security-gate":
+        return _run_security_gate(args)
     if args.command == "freshness":
         return _run_freshness(args)
     if args.command == "promote":
@@ -829,6 +845,27 @@ def _run_credential_matrix(args: argparse.Namespace) -> int:
     return 0 if report["matrix_verified"] else 2
 
 
+def _run_security_gate(args: argparse.Namespace) -> int:
+    try:
+        report = run_security_scheme_gate(
+            Path(args.path),
+            contract=args.contract,
+            matrix_evidence=args.matrix_evidence,
+            server=args.server,
+            mode=args.mode,
+            timeout=args.timeout,
+            write_evidence=args.write_evidence,
+            evidence_output=args.evidence_output,
+            force=args.force,
+        )
+    except SecuritySchemeGateError as exc:
+        _print_error(str(exc))
+        return 1
+
+    _print_json(report, pretty=args.pretty)
+    return 0 if report["gate_passed"] else 2
+
+
 def _run_freshness(args: argparse.Namespace) -> int:
     try:
         report = run_verification_freshness(
@@ -868,6 +905,7 @@ def _run_promote(args: argparse.Namespace) -> int:
             negative_baseline=args.negative_baseline,
             credential_matrix=args.credential_matrix,
             credential_baseline=args.credential_baseline,
+            security_contract=args.security_contract,
         )
         if args.write:
             report["write_result"] = write_promoted_release(
