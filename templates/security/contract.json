@@ -3,18 +3,23 @@
   "server": "replace-with-server-name",
   "profiles": {
     "anonymous": {
+      "auth": "anonymous",
       "scopes": []
     },
     "viewer": {
+      "auth": "oauth",
       "scopes": ["docs.read"]
     },
     "editor": {
+      "auth": "oauth",
       "scopes": ["docs.read", "docs.write"]
     },
     "admin": {
+      "auth": "oauth",
       "scopes": ["docs.read", "docs.write", "admin.read"]
     },
     "missing-scope": {
+      "auth": "oauth",
       "scopes": []
     }
   },
