@@ -280,7 +280,7 @@ def run_security_scheme_gate(
 def _validate_contract(
     payload: dict[str, Any],
 ) -> tuple[
-    dict[str, set[str]],
+    dict[str, dict[str, Any]],
     list[dict[str, Any]],
 ]:
     raw_profiles = payload.get("profiles")
@@ -292,7 +292,7 @@ def _validate_contract(
             "security scheme contract profiles must be a non-empty object"
         )
 
-    profiles: dict[str, set[str]] = {}
+    profiles: dict[str, dict[str, Any]] = {}
     for profile_id, raw in raw_profiles.items():
         if (
             not isinstance(profile_id, str)
@@ -302,9 +302,14 @@ def _validate_contract(
             raise SecuritySchemeGateError(
                 "security scheme profile ids must map to objects"
             )
-        if set(raw) != {"scopes"}:
+        if set(raw) != {"auth", "scopes"}:
             raise SecuritySchemeGateError(
-                f"security scheme profile {profile_id} supports only scopes"
+                f"security scheme profile {profile_id} requires auth and scopes"
+            )
+        auth = raw.get("auth")
+        if auth not in {"anonymous", "oauth"}:
+            raise SecuritySchemeGateError(
+                f"security scheme profile {profile_id} auth must be anonymous or oauth"
             )
         scopes = raw.get("scopes")
         if (
@@ -318,7 +323,10 @@ def _validate_contract(
             raise SecuritySchemeGateError(
                 f"security scheme profile {profile_id} scopes must be a string list"
             )
-        profiles[profile_id] = set(scopes)
+        profiles[profile_id] = {
+            "auth": auth,
+            "scopes": set(scopes),
+        }
 
     raw_tools = payload.get("tools")
     if (
@@ -518,7 +526,7 @@ def _check_scope_evidence(
     tool_name: str,
     schemes: list[dict[str, Any]],
     policy: dict[str, Any],
-    profiles: dict[str, set[str]],
+    profiles: dict[str, dict[str, Any]],
     matrix_cases: dict[str, dict[str, Any]],
 ) -> tuple[
     list[str],
@@ -547,12 +555,14 @@ def _check_scope_evidence(
             )
             continue
         profile_id = case.get("credential")
-        scopes = profiles.get(profile_id)
-        if scopes is None:
+        profile = profiles.get(profile_id)
+        if profile is None:
             blockers.append(
                 f"sufficient_case_profile_missing:{case_id}"
             )
             continue
+        scopes = set(profile["scopes"])
+        auth = profile["auth"]
         observation = case.get("observation")
         outcome = (
             observation.get("outcome")
@@ -563,14 +573,19 @@ def _check_scope_evidence(
             blockers.append(
                 f"sufficient_case_not_success:{case_id}"
             )
-        compatible = (
-            True
-            if policy["access"] == "noauth"
-            else any(
+        if auth == "anonymous":
+            compatible = (
+                policy["access"] in {"noauth", "optional_auth"}
+                and any(
+                    item.get("type") == "noauth"
+                    for item in schemes
+                )
+            )
+        else:
+            compatible = any(
                 declared.issubset(scopes)
                 for declared in oauth_sets
             )
-        )
         if not compatible:
             blockers.append(
                 f"declared_scope_not_supported_by_success:{case_id}"
@@ -579,6 +594,7 @@ def _check_scope_evidence(
             {
                 "case_id": case_id,
                 "profile": profile_id,
+                "auth": auth,
                 "scopes": sorted(scopes),
                 "outcome": outcome,
                 "compatible": compatible,
@@ -600,12 +616,18 @@ def _check_scope_evidence(
             )
             continue
         profile_id = case.get("credential")
-        scopes = profiles.get(profile_id)
-        if scopes is None:
+        profile = profiles.get(profile_id)
+        if profile is None:
             blockers.append(
                 f"insufficient_case_profile_missing:{case_id}"
             )
             continue
+        scopes = set(profile["scopes"])
+        auth = profile["auth"]
+        if auth != "oauth":
+            blockers.append(
+                f"insufficient_scope_case_not_oauth:{case_id}"
+            )
         observation = case.get("observation")
         outcome = (
             observation.get("outcome")
@@ -632,6 +654,7 @@ def _check_scope_evidence(
             {
                 "case_id": case_id,
                 "profile": profile_id,
+                "auth": auth,
                 "scopes": sorted(scopes),
                 "outcome": outcome,
                 "satisfies_declared_scheme": already_satisfies,
@@ -643,7 +666,8 @@ def _check_scope_evidence(
         supporters = [
             item["case_id"]
             for item in sufficient
-            if declared.issubset(
+            if item.get("auth") == "oauth"
+            and declared.issubset(
                 set(item["scopes"])
             )
         ]
