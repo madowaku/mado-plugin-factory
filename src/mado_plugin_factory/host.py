@@ -166,6 +166,106 @@ def run_host_replay(
     return result
 
 
+
+def evaluate_host_replay(
+    trace: dict[str, Any],
+    runtime: dict[str, Any],
+    *,
+    trace_sha256: str,
+    runtime_sha256: str,
+    runtime_label: str = "in-memory-runtime.json",
+) -> dict[str, Any]:
+    """Evaluate normalized host trace data against executed M0.9 evidence."""
+    capture = _validate_capture(trace)
+    events = _validate_events(trace)
+    _validate_runtime_evidence(runtime)
+
+    expected = sorted(
+        set(runtime.get("host_required_extensions") or [])
+        & HOST_EXTENSION_IDS
+    )
+    checks = [
+        _check_extension(extension_id, events)
+        for extension_id in expected
+    ]
+    accepted = sorted(
+        item["id"]
+        for item in checks
+        if item["state"] == "accepted"
+    )
+    missing = sorted(
+        item["id"]
+        for item in checks
+        if item["state"] != "accepted"
+    )
+
+    capture_attested = bool(
+        capture["product"] == "chatgpt"
+        and capture["executed"]
+        and capture["attested_chatgpt_capture"]
+    )
+    replay_passed = not missing
+    end_to_end_verified = bool(
+        runtime["runtime_smoke_passed"]
+        and expected
+        and replay_passed
+        and capture_attested
+    )
+    acceptance_id = _acceptance_id(
+        trace_sha256,
+        runtime_sha256,
+        expected,
+        accepted,
+    )
+
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "evidence_state": "executed",
+        "acceptance_id": acceptance_id,
+        "source": {
+            "trace_sha256": trace_sha256,
+            "runtime_evidence": runtime_label,
+            "runtime_evidence_sha256": runtime_sha256,
+        },
+        "capture": {
+            "product": capture["product"],
+            "surface": capture["surface"],
+            "mode": capture["mode"],
+            "executed": capture["executed"],
+            "attested_chatgpt_capture": capture[
+                "attested_chatgpt_capture"
+            ],
+        },
+        "trace": {
+            "event_count": len(events),
+            "raw_trace_persisted": False,
+            "sensitive_payloads_persisted": False,
+        },
+        "runtime_prerequisite": {
+            "smoke_id": runtime.get("smoke_id"),
+            "runtime_smoke_passed": runtime["runtime_smoke_passed"],
+            "runtime_scope": runtime.get("runtime_scope"),
+            "host_required_extensions": expected,
+        },
+        "extension_checks": checks,
+        "accepted_extensions": accepted,
+        "missing_extensions": missing,
+        "capture_attested": capture_attested,
+        "host_replay_passed": replay_passed,
+        "end_to_end_verified": end_to_end_verified,
+        "verification_scope": (
+            "chatgpt_host_replay"
+            if capture_attested
+            else "unattested_host_trace_replay"
+        ),
+        "warnings": _warnings(
+            capture_attested=capture_attested,
+            expected=expected,
+            missing=missing,
+        ),
+    }
+
+
 def _validate_capture(trace: dict[str, Any]) -> dict[str, Any]:
     capture = trace.get("capture")
     if not isinstance(capture, dict):
