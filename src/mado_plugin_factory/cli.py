@@ -26,6 +26,7 @@ from .evals import (
     load_eval_metadata,
     write_submission_evals,
 )
+from .host import HostReplayError, run_host_replay
 from .manifest import ManifestError, compile_manifest, load_metadata, write_compiled_manifest
 from .marketplace import (
     DEFAULT_CACHE_ROOT,
@@ -138,6 +139,15 @@ def build_parser() -> argparse.ArgumentParser:
     runtime_smoke.add_argument("--evidence-output", help="Relative runtime evidence output path")
     runtime_smoke.add_argument("--force", action="store_true", help="Replace differing evidence output")
     runtime_smoke.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
+
+    host_replay = sub.add_parser("host-replay", help="Replay captured ChatGPT host extension evidence")
+    host_replay.add_argument("path", nargs="?", default=".", help="Candidate directory (default: .)")
+    host_replay.add_argument("--trace", type=Path, required=True, help="Normalized captured ChatGPT host trace JSON")
+    host_replay.add_argument("--runtime-evidence", help="Relative M0.9 runtime evidence path; auto-selects when exactly one exists")
+    host_replay.add_argument("--write-evidence", action="store_true", help="Persist replayed host acceptance evidence")
+    host_replay.add_argument("--evidence-output", help="Relative host acceptance evidence output path")
+    host_replay.add_argument("--force", action="store_true", help="Replace differing host acceptance evidence")
+    host_replay.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
 
     manifest = sub.add_parser("manifest", help="Compile a portable plugin.json manifest")
     manifest.add_argument("path", nargs="?", default=".", help="Candidate directory (default: .)")
@@ -266,6 +276,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_patch(args)
     if args.command == "runtime-smoke":
         return _run_runtime_smoke(args)
+    if args.command == "host-replay":
+        return _run_host_replay(args)
     if args.command == "manifest":
         return _run_manifest(args)
     if args.command == "evals":
@@ -375,6 +387,28 @@ def _run_runtime_smoke(args: argparse.Namespace) -> int:
     if report["runtime_verified"]:
         return 0
     if report["runtime_smoke_passed"]:
+        return 3
+    return 2
+
+
+def _run_host_replay(args: argparse.Namespace) -> int:
+    try:
+        report = run_host_replay(
+            Path(args.path),
+            args.trace,
+            runtime_evidence=args.runtime_evidence,
+            write_evidence=args.write_evidence,
+            evidence_output=args.evidence_output,
+            force=args.force,
+        )
+    except HostReplayError as exc:
+        _print_error(str(exc))
+        return 1
+
+    _print_json(report, pretty=args.pretty)
+    if report["end_to_end_verified"]:
+        return 0
+    if report["host_replay_passed"]:
         return 3
     return 2
 

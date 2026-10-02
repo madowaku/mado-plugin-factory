@@ -1,6 +1,6 @@
-# MADO_PLUGIN_FACTORY_SPEC.md v0.9
+# MADO_PLUGIN_FACTORY_SPEC.md v1.0
 
-Status: Implemented through M0.9  
+Status: Implemented through M1.0  
 Project: MADO Plugin Factory  
 Repository: `madowaku/mado-plugin-factory`
 
@@ -37,6 +37,9 @@ Extension Apply / Patch Engine    <- M0.8 complete
   |
   v
 Extension Runtime Smoke / Evidence <- M0.9 complete
+  |
+  v
+ChatGPT Host Replay / Acceptance   <- M1.0 complete
 ```
 
 The factory separates "generated", "inspected", and "executed" evidence and refuses to turn missing proof into a release claim.
@@ -625,7 +628,93 @@ The artifact records protocol era/version, server identity, tool names, resource
 - `2`: expected runtime metadata is missing
 - `1`: runtime/configuration error
 
-## 11. Safety rules
+## 11. MPF-M1.0 ChatGPT Host Replay / Extension Acceptance
+
+Status: complete.
+
+### 11.1 Goal
+
+Close the host-only verification gap left by M0.9 without pretending that CI can drive the ChatGPT product UI. M1.0 consumes a normalized trace captured from an executed ChatGPT session, replays the extension-specific host contracts deterministically, and combines the result with executed M0.9 server evidence.
+
+### 11.2 CLI
+
+```bash
+mpf host-replay <plugin-root> \\
+  --trace ./chatgpt-host-trace.json \\
+  --runtime-evidence evidence/runtime/extensions/<runtime>.json \\
+  --pretty
+```
+
+Persist evidence with `--write-evidence`. When exactly one M0.9 evidence file exists under `evidence/runtime/extensions/`, `--runtime-evidence` may be omitted.
+
+### 11.3 Capture contract
+
+The normalized trace declares:
+
+- `capture.product = "chatgpt"`
+- supported surface: web, desktop, iOS, Android, or API Playground
+- capture mode: developer mode, installed plugin, or API Playground
+- `capture.executed`: whether the session actually occurred
+- `capture.attested_chatgpt_capture`: explicit provenance attestation
+- normalized host/app/server events with direction, method, optional call ID, params, and result
+
+The repository template defaults both execution and attestation to false.
+
+### 11.4 M0.9 prerequisite
+
+Host acceptance requires executed M0.9 evidence with:
+
+- `evidence_state = executed`
+- `runtime_scope = mcp_server`
+- `runtime_smoke_passed = true`
+
+M1.0 only accepts host-required surfaces listed by that exact runtime evidence. A host trace by itself cannot create end-to-end verification.
+
+### 11.5 Deep-link acceptance
+
+Deep links are accepted when the trace contains ChatGPT-to-app evidence from either UI initialization or `ui/notifications/host-context-changed` with `openai/deepLink.url` that begins with `/` and contains no fragment.
+
+The acceptance artifact stores only a SHA-256 of the observed app-relative URL, not the URL text.
+
+### 11.6 Model-App Context acceptance
+
+Model-App Context is accepted when an app-to-host `ui/update-model-context` request contains content or structured content and a correlated host-to-app response with `_meta.openai/modelContext.updateId` is present.
+
+The acceptance artifact stores the call ID and a SHA-256 of the update ID. Model context content is not persisted.
+
+### 11.7 Rich-form acceptance
+
+Rich forms are accepted when a server-to-host `openai/elicitation/create` or modern `elicitation/create` form request has a correlated host-to-server result whose action is `accept`, `decline`, or `cancel`.
+
+Any valid user outcome proves the host round trip. Form schema and submitted form content are not copied into acceptance evidence.
+
+### 11.8 Verification states
+
+`host_replay_passed=true` means every host-required extension from the selected M0.9 evidence has a valid trace contract.
+
+`end_to_end_verified=true` additionally requires an executed and explicitly attested ChatGPT capture plus successful M0.9 server smoke. Synthetic or normalized fixture replay can test the validator but cannot satisfy the provenance gate unless explicitly marked as an executed ChatGPT capture.
+
+### 11.9 Privacy and evidence
+
+M1.0 persists only:
+
+- trace SHA-256
+- M0.9 evidence SHA-256
+- capture product/surface/mode and attestation booleans
+- event count
+- extension acceptance summaries
+- correlation IDs and hashed host identifiers where needed
+
+It does not persist raw trace payloads, model-context text, form content, deep-link URL text, HTML bodies, credentials, or bearer tokens.
+
+### 11.10 Exit codes
+
+- `0`: end-to-end host acceptance verified
+- `3`: replay shape passes but ChatGPT capture is unattested
+- `2`: expected host acceptance evidence is incomplete
+- `1`: trace/runtime evidence error
+
+## 12. Safety rules
 
 M0.5 MUST NOT:
 
@@ -640,7 +729,7 @@ M0.5 MUST NOT:
 - write outside the plugin root
 - silently overwrite a differing release bundle
 
-## 12. Acceptance
+## 13. Acceptance
 
 MPF-M0.5 is complete when:
 
@@ -720,7 +809,24 @@ MPF-M0.9 is complete when:
 - CLI exit codes distinguish verified, host-required, missing, and execution-error states
 - unit/CI tests use a live fixture MCP process and cover modern, legacy, missing metadata, host-required, evidence safety, server selection, and CLI behavior
 
-## 13. North star
+### MPF-M1.0 acceptance
+
+MPF-M1.0 is complete when:
+
+- one command replays a normalized captured ChatGPT host trace
+- executed M0.9 runtime evidence is a mandatory prerequisite for end-to-end verification
+- deep links require valid ChatGPT host-context delivery
+- Model-App Context requires a correlated request/response and host update ID
+- rich forms require a correlated elicitation round trip
+- valid decline/cancel outcomes prove form rendering without being treated as user approval
+- unattested traces can exercise replay but cannot become end-to-end verified
+- raw trace payloads and sensitive form/model-context values are not persisted
+- trace and runtime evidence hashes bind the acceptance artifact to its sources
+- evidence output stays inside the plugin root and is overwrite-safe
+- CLI exit codes distinguish verified, unattested, incomplete, and invalid states
+- unit/CI tests cover full acceptance, missing events, correlation failure, decline flow, deep-link validation, privacy, runtime provenance, automatic evidence selection, and CLI behavior
+
+## 14. North star
 
 ```text
 "I have a useful Skill"
