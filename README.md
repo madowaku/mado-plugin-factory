@@ -17,6 +17,7 @@ Skill / Repo
   -> MPF-M0.9 Extension Runtime Smoke / Evidence
   -> MPF-M1.0 ChatGPT Host Replay / Extension Acceptance
   -> MPF-M1.1 Host Trace Capture / Normalizer
+  -> MPF-M1.2 Extension Verification Orchestrator
 ```
 
 ## Status
@@ -33,8 +34,9 @@ Skill / Repo
 - **MPF-M0.9 Extension Runtime Smoke / Evidence** ✅
 - **MPF-M1.0 ChatGPT Host Replay / Extension Acceptance** ✅
 - **MPF-M1.1 Host Trace Capture / Normalizer** ✅
+- **MPF-M1.2 Extension Verification Orchestrator** ✅
 
-Current package version: `1.1.0`.
+Current package version: `1.2.0`.
 
 ## M0.1 Candidate Scanner
 
@@ -460,6 +462,60 @@ evidence/host/captures/<capture-id>/
 
 Capture provenance is explicit. `--attest-chatgpt-capture` is rejected unless `--executed` is also supplied. M1.1 normalization success does not itself grant end-to-end verification; M1.0 remains the acceptance gate.
 
+## M1.2 Extension Verification Orchestrator
+
+M1.2 binds M0.9 runtime smoke, M1.1 host capture normalization, and M1.0 host replay into one verification run and one auditable dossier.
+
+Runtime-only verification:
+
+```bash
+mpf verify-extensions /path/to/plugin --write --pretty
+```
+
+When M0.9 reports host-required extensions, the same command stops cleanly at `awaiting_host_capture` and records the exact next action instead of treating missing external evidence as a runtime failure.
+
+Provide a real ChatGPT capture to close the host stage:
+
+```bash
+mpf verify-extensions /path/to/plugin \\
+  --capture ./raw-host-log.json \\
+  --surface web \\
+  --capture-mode developer_mode \\
+  --executed \\
+  --attest-chatgpt-capture \\
+  --write \\
+  --pretty
+```
+
+The orchestrator distinguishes implementation/runtime failures from external-evidence waits with states such as:
+
+- `verified_mcp_server`
+- `awaiting_host_capture`
+- `verified_chatgpt_host`
+- `awaiting_capture_attestation`
+- `host_incomplete`
+- `runtime_failed`
+
+Default output:
+
+```text
+evidence/verifications/extensions/<verification-id>/
+  dossier.json
+  runtime.json
+  capture.json     # when a capture was supplied
+  trace.json       # privacy-reduced normalized trace
+  host.json        # when host replay ran
+```
+
+`dossier.json` contains stage digests, verdicts, missing extensions, stage errors, and next actions. It never copies the raw host log. A runtime-only plugin can complete at MCP-server scope; plugins with host-required extensions only become fully verified after M1.0 accepts an attested ChatGPT capture.
+
+Exit codes:
+
+- `0`: verification complete and verified
+- `3`: external ChatGPT capture or capture attestation still needed
+- `2`: runtime/host verification failed or remains incomplete
+- `1`: orchestrator input/write error
+
 ## Evidence states
 
 The factory uses only:
@@ -476,7 +532,7 @@ A stronger evidence state is never claimed without corresponding proof or explic
 PYTHONPATH=src python -m unittest discover -s tests -v
 ```
 
-Coverage includes the full M0.1-M1.1 pipeline, including deterministic ZIP generation, bundle overwrite safety, MCP-specific submission blockers, local install evidence, path containment, and secret-bearing metadata rejection.
+Coverage includes the full M0.1-M1.2 pipeline, including deterministic ZIP generation, bundle overwrite safety, MCP-specific submission blockers, local install evidence, path containment, and secret-bearing metadata rejection.
 
 ## Source of truth
 
