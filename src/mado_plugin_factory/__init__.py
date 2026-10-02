@@ -6,6 +6,7 @@ from .evals import compile_submission_evals, validate_submission_evals
 from .extensions import compile_extension_capabilities
 from .host import run_host_replay
 from .manifest import compile_manifest, validate_manifest
+from .orchestrator import run_extension_verification
 from .marketplace import (
     compile_marketplace_bridge,
     validate_marketplace_catalog,
@@ -23,6 +24,7 @@ __all__ = [
     "compile_extension_patch",
     "run_extension_runtime_smoke",
     "run_host_replay",
+    "run_extension_verification",
     "apply_extension_patch",
     "compile_manifest",
     "compile_marketplace_bridge",
@@ -34,4 +36,4 @@ __all__ = [
     "validate_submission_evals",
     "verify_marketplace_install",
 ]
-__version__ = "1.1.0"
+__version__ = "1.2.0"
