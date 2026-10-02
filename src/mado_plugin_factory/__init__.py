@@ -2,6 +2,7 @@
 
 from .behavior import run_behavior_canary
 from .capture import normalize_host_capture
+from .credentials import run_credential_matrix
 from .bundle import compile_submission_bundle
 from .evals import compile_submission_evals, validate_submission_evals
 from .extensions import compile_extension_capabilities
@@ -25,6 +26,7 @@ __all__ = [
     "compile_extension_capabilities",
     "normalize_host_capture",
     "run_behavior_canary",
+    "run_credential_matrix",
     "run_negative_contract",
     "compile_extension_scaffold",
     "compile_extension_patch",
@@ -45,4 +47,4 @@ __all__ = [
     "validate_submission_evals",
     "verify_marketplace_install",
 ]
-__version__ = "1.6.0"
+__version__ = "1.7.0"
