@@ -5,6 +5,14 @@ import json
 import sys
 from pathlib import Path
 
+from .bundle import (
+    DEFAULT_EVAL_EVIDENCE,
+    DEFAULT_INSTALL_EVIDENCE,
+    BundleError,
+    compile_submission_bundle,
+    load_release_metadata,
+    write_submission_bundle,
+)
 from .evals import (
     DEFAULT_OUTPUT,
     EvalError,
@@ -130,6 +138,27 @@ def build_parser() -> argparse.ArgumentParser:
     verify.add_argument("--write-evidence", action="store_true", help="Write executed verification evidence")
     verify.add_argument("--force", action="store_true", help="Replace differing evidence output")
     verify.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
+
+    bundle = sub.add_parser("bundle", help="Compile a versioned submission evidence bundle")
+    bundle.add_argument("path", nargs="?", default=".", help="Plugin candidate directory")
+    bundle.add_argument("--release-metadata", type=Path, help="JSON release/submission attestations")
+    bundle.add_argument(
+        "--eval-evidence",
+        default=DEFAULT_EVAL_EVIDENCE,
+        help=f"Relative eval evidence path (default: {DEFAULT_EVAL_EVIDENCE})",
+    )
+    bundle.add_argument(
+        "--install-evidence",
+        default=DEFAULT_INSTALL_EVIDENCE,
+        help=f"Relative install evidence path (default: {DEFAULT_INSTALL_EVIDENCE})",
+    )
+    bundle.add_argument(
+        "--output",
+        help="Relative bundle directory; defaults to evidence/releases/<plugin-version>",
+    )
+    bundle.add_argument("--write", action="store_true", help="Write bundle files and deterministic plugin ZIP")
+    bundle.add_argument("--force", action="store_true", help="Replace differing bundle files")
+    bundle.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
     return parser
 
 
@@ -147,6 +176,8 @@ def main(argv: list[str] | None = None) -> int:
             return _run_marketplace_bridge(args)
         if args.marketplace_command == "verify":
             return _run_marketplace_verify(args)
+    if args.command == "bundle":
+        return _run_bundle(args)
     return 1
 
 
@@ -254,6 +285,34 @@ def _run_marketplace_verify(args: argparse.Namespace) -> int:
 
     _print_json(report, pretty=args.pretty)
     return 0 if report["install_verified"] else 2
+
+
+def _run_bundle(args: argparse.Namespace) -> int:
+    try:
+        metadata = load_release_metadata(args.release_metadata) if args.release_metadata else {}
+        report = compile_submission_bundle(
+            Path(args.path),
+            release_metadata=metadata,
+            eval_evidence=args.eval_evidence,
+            install_evidence=args.install_evidence,
+        )
+        if args.write:
+            report["written"] = write_submission_bundle(
+                Path(args.path),
+                report,
+                output=args.output,
+                force=args.force,
+            )
+    except (BundleError, ScanError) as exc:
+        _print_error(str(exc))
+        return 1
+
+    _print_json(report, pretty=args.pretty)
+    if report["submission_ready"]:
+        return 0
+    if report["upload_ready"]:
+        return 3
+    return 2
 
 
 def _apply_manifest_overrides(metadata: dict, args: argparse.Namespace) -> dict:
