@@ -333,6 +333,7 @@ def build_parser() -> argparse.ArgumentParser:
     canary.add_argument("path", nargs="?", default=".", help="Plugin candidate directory")
     canary.add_argument("--contract", required=True, help="Relative behavioral canary contract JSON")
     canary.add_argument("--baseline", help="Relative recorded canary evidence for replay; omit to record a baseline")
+    canary.add_argument("--verification-evidence", help="Relative verified M1.2 dossier to bind the canary baseline/replay")
     canary.add_argument("--server", help="MCP server name; falls back to contract/default server")
     canary.add_argument("--mode", default="auto", choices=["auto", "modern", "legacy"], help="MCP protocol era preference (default: auto)")
     canary.add_argument("--timeout", type=float, default=5.0, help="Per-request MCP timeout in seconds (default: 5)")
@@ -726,6 +727,7 @@ def _run_canary(args: argparse.Namespace) -> int:
             Path(args.path),
             contract=args.contract,
             baseline_evidence=args.baseline,
+            verification_evidence=args.verification_evidence,
             server=args.server,
             mode=args.mode,
             timeout=args.timeout,
