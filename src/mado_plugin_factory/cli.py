@@ -5,6 +5,12 @@ import json
 import sys
 from pathlib import Path
 
+from .capture import (
+    HostCaptureError,
+    normalize_host_capture,
+    public_capture_report,
+    write_host_capture,
+)
 from .bundle import (
     DEFAULT_EVAL_EVIDENCE,
     DEFAULT_INSTALL_EVIDENCE,
@@ -139,6 +145,35 @@ def build_parser() -> argparse.ArgumentParser:
     runtime_smoke.add_argument("--evidence-output", help="Relative runtime evidence output path")
     runtime_smoke.add_argument("--force", action="store_true", help="Replace differing evidence output")
     runtime_smoke.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
+
+    host_capture = sub.add_parser("host-capture", help="Normalize captured ChatGPT host logs for replay")
+    host_capture.add_argument("path", nargs="?", default=".", help="Candidate directory (default: .)")
+    host_capture.add_argument("--input", type=Path, required=True, help="Raw or normalized capture file")
+    host_capture.add_argument(
+        "--format",
+        dest="source_format",
+        default="auto",
+        choices=["auto", "json", "jsonl", "normalized"],
+        help="Input adapter format (default: auto)",
+    )
+    host_capture.add_argument(
+        "--surface",
+        required=True,
+        choices=["web", "desktop", "ios", "android", "api_playground"],
+        help="ChatGPT surface where the capture was observed",
+    )
+    host_capture.add_argument(
+        "--mode",
+        required=True,
+        choices=["developer_mode", "installed_plugin", "api_playground"],
+        help="ChatGPT capture mode",
+    )
+    host_capture.add_argument("--executed", action="store_true", help="Attest that this capture came from an executed session")
+    host_capture.add_argument("--attest-chatgpt-capture", action="store_true", help="Explicitly attest that the source was captured from ChatGPT")
+    host_capture.add_argument("--output-dir", help="Relative capture output directory")
+    host_capture.add_argument("--write", action="store_true", help="Write normalized trace and capture report")
+    host_capture.add_argument("--force", action="store_true", help="Replace differing capture artifacts")
+    host_capture.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
 
     host_replay = sub.add_parser("host-replay", help="Replay captured ChatGPT host extension evidence")
     host_replay.add_argument("path", nargs="?", default=".", help="Candidate directory (default: .)")
@@ -276,6 +311,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_patch(args)
     if args.command == "runtime-smoke":
         return _run_runtime_smoke(args)
+    if args.command == "host-capture":
+        return _run_host_capture(args)
     if args.command == "host-replay":
         return _run_host_replay(args)
     if args.command == "manifest":
@@ -389,6 +426,32 @@ def _run_runtime_smoke(args: argparse.Namespace) -> int:
     if report["runtime_smoke_passed"]:
         return 3
     return 2
+
+
+def _run_host_capture(args: argparse.Namespace) -> int:
+    try:
+        report = normalize_host_capture(
+            Path(args.path),
+            args.input,
+            source_format=args.source_format,
+            surface=args.surface,
+            mode=args.mode,
+            executed=args.executed,
+            attest_chatgpt_capture=args.attest_chatgpt_capture,
+            output_dir=args.output_dir,
+        )
+        if args.write:
+            report["written"] = write_host_capture(
+                Path(args.path),
+                report,
+                force=args.force,
+            )
+    except HostCaptureError as exc:
+        _print_error(str(exc))
+        return 1
+
+    _print_json(public_capture_report(report), pretty=args.pretty)
+    return 0 if report["normalization_ready"] else 2
 
 
 def _run_host_replay(args: argparse.Namespace) -> int:
