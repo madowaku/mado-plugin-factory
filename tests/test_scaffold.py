@@ -23,8 +23,8 @@ class ExtensionScaffoldGeneratorTests(unittest.TestCase):
         self.assertIn("plugin_settings", report["generated"])
         self.assertIn("composer_mentions", report["generated"])
         self.assertIn("rich_forms", report["generated"])
-        skipped = {item["id"]: item for item in report["skipped"]}
-        self.assertEqual(skipped["file_viewer_editor"]["reason"], "blocked")
+        self.assertNotIn("file_viewer_editor", report["selection"])
+        self.assertNotIn("sidebar_app", report["selection"])
         self.assertTrue(report["output"].startswith("evidence/"))
         self.assertFalse(report["runtime_modified"])
 
