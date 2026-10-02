@@ -1,0 +1,17 @@
+{
+  "schema_version": "0.1",
+  "server": "replace-with-server-name",
+  "cases": [
+    {
+      "id": "read-only-smoke",
+      "tool": "replace-with-read-only-tool",
+      "arguments": {},
+      "expect": {
+        "outcome": "success",
+        "structured_content": "required",
+        "content_types": ["text"]
+      },
+      "stable_paths": []
+    }
+  ]
+}
