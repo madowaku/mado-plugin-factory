@@ -1,6 +1,6 @@
-# MADO_PLUGIN_FACTORY_SPEC.md v1.4
+# MADO_PLUGIN_FACTORY_SPEC.md v1.5
 
-Status: Implemented through M1.4  
+Status: Implemented through M1.5  
 Project: MADO Plugin Factory  
 Repository: `madowaku/mado-plugin-factory`
 
@@ -52,6 +52,9 @@ Verification Promotion Gate / Release Bundle Bridge <- M1.3 complete
   |
   v
 Verification Freshness / Remote MCP Drift Gate <- M1.4 complete
+  |
+  v
+Behavioral Contract Replay / Remote MCP Canary <- M1.5 complete
 ```
 
 The factory separates "generated", "inspected", and "executed" evidence and refuses to turn missing proof into a release claim.
@@ -1116,7 +1119,125 @@ When live promotion runs, `verification/freshness.json` is copied beside the M1.
 
 M1.4 proves freshness of the **advertised MCP surface**. It does not prove that tool business behavior, external dependencies, or authorization enforcement are unchanged when those changes do not alter the advertised protocol/tool/resource surface.
 
-## 16. Safety rules
+## 16. MPF-M1.5 Behavioral Contract Replay / Remote MCP Canary
+
+Status: complete.
+
+### 16.1 Goal
+
+Detect behavioral drift that does not change the advertised MCP surface by executing explicit, deterministic read-only fixture calls and comparing privacy-reduced result contracts against a recorded baseline.
+
+### 16.2 Canary contract
+
+Start from:
+
+```text
+templates/canary/contract.json
+```
+
+Each case declares:
+
+- stable case id
+- MCP tool name
+- fixture arguments
+- expected outcome: `success`, `tool_error`, or `protocol_error`
+- whether `structuredContent` is required/optional/forbidden
+- expected returned content types
+- optional expected protocol error code
+- optional `stable_paths` inside structured content whose values should remain stable
+
+The contract file itself may contain fixture values, but executed evidence stores only an arguments SHA-256, never raw arguments.
+
+### 16.3 Read-only execution gate
+
+Before sending `tools/call`, M1.5 inspects the live tool descriptor and requires:
+
+```text
+annotations.readOnlyHint = true
+```
+
+A tool lacking this explicit annotation is refused before invocation. Write/destructive canaries are out of scope for M1.5.
+
+### 16.4 Record baseline
+
+```bash
+mpf canary <plugin-root> \
+  --contract ./canary-contract.json \
+  --verification-evidence evidence/verifications/extensions/<id>/dossier.json \
+  --write-evidence
+```
+
+Record mode executes each safe case, validates declared expectations, and writes executed canary evidence under:
+
+```text
+evidence/canary/extensions/<canary-id>.json
+```
+
+When `--verification-evidence` is supplied, the baseline stores the verification ID and dossier SHA-256. Promotion can therefore require that the canary baseline was recorded against the same M1.2 verification run.
+
+### 16.5 Replay
+
+```bash
+mpf canary <plugin-root> \
+  --contract ./canary-contract.json \
+  --baseline evidence/canary/extensions/<baseline-id>.json \
+  --verification-evidence evidence/verifications/extensions/<id>/dossier.json
+```
+
+Replay requires the contract SHA-256 to match the baseline. When a verification dossier is supplied, the baseline dossier SHA-256 must also match.
+
+### 16.6 Privacy-reduced behavior observation
+
+M1.5 does not persist raw tool results. For each case it records:
+
+- outcome class
+- protocol error code when applicable
+- returned content types
+- recursive type/key shape of structured content
+- SHA-256 values for explicitly declared stable paths
+- overall behavior SHA-256
+
+Tool-result text, structured values outside declared stable paths, and protocol error messages are not persisted.
+
+### 16.7 Behavioral drift
+
+Replay is verified only when:
+
+- every case is safe to execute
+- every declared expectation still passes
+- every case matches the recorded behavior SHA-256
+- the baseline contract still matches
+- the selected verification binding still matches when present
+
+A changed structured-content shape, error class/code, content type, or stable-path value produces behavioral drift even when M1.4 runtime metadata remains fresh.
+
+### 16.8 Promotion integration
+
+Behavioral promotion is opt-in because fixture design is product-specific.
+
+```bash
+mpf promote <plugin-root> \
+  --verification-evidence evidence/verifications/extensions/<id>/dossier.json \
+  --canary-contract ./canary-contract.json \
+  --canary-baseline evidence/canary/extensions/<baseline-id>.json
+```
+
+Both canary flags are required together. Live promotion still performs M1.4 freshness first, then M1.5 replay. A failed replay adds `verification_behavior_canary_stale`.
+
+When enabled, promoted release evidence includes:
+
+```text
+verification/canary-baseline.json
+verification/canary-replay.json
+```
+
+Both remain outside `plugin.zip`.
+
+### 16.9 Scope boundary
+
+M1.5 proves only the declared read-only fixture contracts. It does not automatically exercise write/destructive tools, does not prove all authorization behavior, and does not claim exhaustive business-semantic equivalence.
+
+## 17. Safety rules
 
 M0.5 MUST NOT:
 
@@ -1131,7 +1252,7 @@ M0.5 MUST NOT:
 - write outside the plugin root
 - silently overwrite a differing release bundle
 
-## 17. Acceptance
+## 18. Acceptance
 
 MPF-M0.5 is complete when:
 
@@ -1295,7 +1416,23 @@ MPF-M1.4 is complete when:
 - freshness evidence writes are contained and overwrite-safe
 - unit/CI tests cover fresh, tool drift, resource drift, serverInfo exclusion, baseline tamper, standalone CLI, and live promotion blocking
 
-## 18. North star
+### MPF-M1.5 acceptance
+
+MPF-M1.5 is complete when:
+
+- one command records a behavioral baseline and one command replays it
+- only explicitly read-only tools can reach `tools/call`
+- representative success, tool-error, and protocol-error contracts are supported
+- raw canary arguments and raw tool results never enter evidence
+- structured-content shape and declared stable-path values are comparable across runs
+- contract drift invalidates an old baseline
+- canary baselines can be SHA-bound to the exact M1.2 verification dossier
+- M1.4 metadata freshness can remain green while M1.5 detects handler-only behavior drift
+- live promotion optionally requires both M1.4 freshness and M1.5 canary verification
+- canary baseline/replay evidence remains outside the plugin ZIP
+- unit/CI tests prove pre-call refusal of non-read-only tools, unchanged replay, stable-value drift, shape drift, privacy, contract drift, CLI behavior, and promotion blocking
+
+## 19. North star
 
 ```text
 "I have a useful Skill"
