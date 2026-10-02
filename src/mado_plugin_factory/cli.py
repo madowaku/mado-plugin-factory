@@ -20,6 +20,7 @@ from .bundle import (
     load_release_metadata,
     write_submission_bundle,
 )
+from .credentials import CredentialMatrixError, run_credential_matrix
 from .extensions import (
     DEFAULT_OUTPUT as DEFAULT_EXTENSION_OUTPUT,
     ExtensionError,
@@ -356,6 +357,19 @@ def build_parser() -> argparse.ArgumentParser:
     negative.add_argument("--force", action="store_true", help="Replace differing negative evidence")
     negative.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
 
+    credential_matrix = sub.add_parser("credential-matrix", help="Record or replay read-only MCP credential/scope boundaries")
+    credential_matrix.add_argument("path", nargs="?", default=".", help="Plugin candidate directory")
+    credential_matrix.add_argument("--contract", required=True, help="Relative credential matrix contract JSON")
+    credential_matrix.add_argument("--baseline", help="Relative recorded credential matrix evidence for replay; omit to record a baseline")
+    credential_matrix.add_argument("--verification-evidence", help="Relative verified M1.2 dossier to bind the credential matrix baseline/replay")
+    credential_matrix.add_argument("--server", help="MCP server name; falls back to contract/default server")
+    credential_matrix.add_argument("--mode", default="auto", choices=["auto", "modern"], help="MCP protocol era preference (default: auto)")
+    credential_matrix.add_argument("--timeout", type=float, default=5.0, help="Per-request MCP timeout in seconds (default: 5)")
+    credential_matrix.add_argument("--write-evidence", action="store_true", help="Persist baseline/replay credential matrix evidence")
+    credential_matrix.add_argument("--evidence-output", help="Relative credential matrix evidence output path")
+    credential_matrix.add_argument("--force", action="store_true", help="Replace differing credential matrix evidence")
+    credential_matrix.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
+
     freshness = sub.add_parser("freshness", help="Re-probe MCP runtime and compare with an M1.2 verification baseline")
     freshness.add_argument("path", nargs="?", default=".", help="Plugin candidate directory")
     freshness.add_argument("--verification-evidence", required=True, help="Relative M1.2 dossier.json path")
@@ -394,6 +408,8 @@ def build_parser() -> argparse.ArgumentParser:
     promote.add_argument("--canary-baseline", help="Relative recorded M1.5 canary baseline; requires --canary-contract")
     promote.add_argument("--negative-contract", help="Relative M1.6 negative contract JSON; requires --negative-baseline")
     promote.add_argument("--negative-baseline", help="Relative recorded M1.6 negative baseline; requires --negative-contract")
+    promote.add_argument("--credential-matrix", help="Relative M1.7 credential matrix contract JSON; requires --credential-baseline")
+    promote.add_argument("--credential-baseline", help="Relative recorded M1.7 credential matrix baseline; requires --credential-matrix")
     promote.add_argument("--output", help="Relative release directory; defaults to evidence/releases/<plugin-version>")
     promote.add_argument("--write", action="store_true", help="Write promoted release bundle plus verification bridge evidence")
     promote.add_argument("--force", action="store_true", help="Replace differing release/promotion artifacts")
@@ -454,6 +470,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_canary(args)
     if args.command == "negative":
         return _run_negative(args)
+    if args.command == "credential-matrix":
+        return _run_credential_matrix(args)
     if args.command == "freshness":
         return _run_freshness(args)
     if args.command == "promote":
@@ -787,6 +805,30 @@ def _run_negative(args: argparse.Namespace) -> int:
     return 0 if report["negative_verified"] else 2
 
 
+def _run_credential_matrix(args: argparse.Namespace) -> int:
+    try:
+        report = run_credential_matrix(
+            Path(args.path),
+            contract=args.contract,
+            baseline_evidence=args.baseline,
+            verification_evidence=args.verification_evidence,
+            server=args.server,
+            mode=args.mode,
+            timeout=args.timeout,
+            write_evidence=args.write_evidence,
+            evidence_output=args.evidence_output,
+            force=args.force,
+        )
+    except CredentialMatrixError as exc:
+        _print_error(str(exc))
+        return 1
+
+    _print_json(report, pretty=args.pretty)
+    if report["mode"] == "record":
+        return 0 if report["matrix_passed"] else 2
+    return 0 if report["matrix_verified"] else 2
+
+
 def _run_freshness(args: argparse.Namespace) -> int:
     try:
         report = run_verification_freshness(
@@ -824,6 +866,8 @@ def _run_promote(args: argparse.Namespace) -> int:
             canary_baseline=args.canary_baseline,
             negative_contract=args.negative_contract,
             negative_baseline=args.negative_baseline,
+            credential_matrix=args.credential_matrix,
+            credential_baseline=args.credential_baseline,
         )
         if args.write:
             report["write_result"] = write_promoted_release(

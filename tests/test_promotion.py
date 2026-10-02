@@ -7,6 +7,7 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 from mado_plugin_factory.behavior import run_behavior_canary
 from mado_plugin_factory.evals import (
@@ -1001,6 +1002,147 @@ class VerificationPromotionGateTests(unittest.TestCase):
             )
             self.assertNotIn(
                 "verification/negative-replay.json",
+                names,
+            )
+
+    def test_stale_credential_matrix_blocks_live_promotion(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "plugin"
+            _make_plugin(root, host_required=False)
+            _make_release_evidence(root)
+            dossier = _verification(
+                root,
+                host_required=False,
+            )
+            (root / "matrix.json").write_text(
+                "{}",
+                encoding="utf-8",
+            )
+            baseline = root / "matrix-baseline.json"
+            baseline.write_text(
+                json.dumps(
+                    {
+                        "evidence_state": "executed",
+                        "matrix_id": "baseline-matrix",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with patch(
+                "mado_plugin_factory.promotion.run_credential_matrix",
+                return_value={
+                    "mode": "replay",
+                    "matrix_id": "replay-matrix",
+                    "matrix_passed": False,
+                    "matrix_verified": False,
+                    "blocking_reasons": [
+                        "viewer-admin:credential_boundary_drift"
+                    ],
+                    "scope": "read_only_credential_scope_boundary",
+                    "contract": {
+                        "sha256": "contract",
+                    },
+                    "baseline": {
+                        "matrix_id": "baseline-matrix",
+                    },
+                },
+            ):
+                report = run_verification_promotion(
+                    root,
+                    release_metadata=_release_metadata(),
+                    verification_evidence=dossier,
+                    credential_matrix="matrix.json",
+                    credential_baseline="matrix-baseline.json",
+                )
+
+            self.assertFalse(report["promotion_ready"])
+            self.assertIn(
+                "verification_credential_matrix_stale",
+                report["blocking_reasons"],
+            )
+
+    def test_verified_credential_matrix_is_copied_outside_zip(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "plugin"
+            _make_plugin(root, host_required=False)
+            _make_release_evidence(root)
+            dossier = _verification(
+                root,
+                host_required=False,
+            )
+            (root / "matrix.json").write_text(
+                "{}",
+                encoding="utf-8",
+            )
+            baseline = root / "matrix-baseline.json"
+            baseline.write_text(
+                json.dumps(
+                    {
+                        "evidence_state": "executed",
+                        "matrix_id": "baseline-matrix",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            replay = {
+                "mode": "replay",
+                "matrix_id": "replay-matrix",
+                "matrix_passed": True,
+                "matrix_verified": True,
+                "blocking_reasons": [],
+                "scope": "read_only_credential_scope_boundary",
+                "contract": {
+                    "sha256": "contract",
+                },
+                "baseline": {
+                    "matrix_id": "baseline-matrix",
+                },
+            }
+
+            with patch(
+                "mado_plugin_factory.promotion.run_credential_matrix",
+                return_value=replay,
+            ):
+                report = run_verification_promotion(
+                    root,
+                    release_metadata=_release_metadata(),
+                    verification_evidence=dossier,
+                    credential_matrix="matrix.json",
+                    credential_baseline="matrix-baseline.json",
+                )
+
+            self.assertTrue(report["promotion_ready"])
+            result = write_promoted_release(
+                root,
+                report,
+            )
+            release = Path(result["bundle_root"])
+            self.assertTrue(
+                (
+                    release
+                    / "verification"
+                    / "credential-matrix-baseline.json"
+                ).is_file()
+            )
+            self.assertTrue(
+                (
+                    release
+                    / "verification"
+                    / "credential-matrix-replay.json"
+                ).is_file()
+            )
+            with zipfile.ZipFile(
+                release / "plugin.zip",
+                "r",
+            ) as archive:
+                names = set(archive.namelist())
+            self.assertNotIn(
+                "verification/credential-matrix-baseline.json",
+                names,
+            )
+            self.assertNotIn(
+                "verification/credential-matrix-replay.json",
                 names,
             )
 

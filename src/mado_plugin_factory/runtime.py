@@ -451,6 +451,138 @@ def _find_read_only_tool_descriptor(
     return descriptor
 
 
+
+def execute_mcp_credential_canary(
+    root: Path,
+    *,
+    tool_name: str,
+    arguments: dict[str, Any],
+    credential: dict[str, Any],
+    server: str | None = None,
+    mode: str = "auto",
+    timeout: float = DEFAULT_TIMEOUT,
+) -> dict[str, Any]:
+    """Execute one read-only MCP call under a selected credential profile."""
+    root = root.expanduser().resolve()
+    if not root.exists() or not root.is_dir():
+        raise RuntimeSmokeError(
+            f"candidate path is not a directory: {root}"
+        )
+    if mode == "legacy":
+        raise RuntimeSmokeError(
+            "credential matrix replay requires a modern streamable-http MCP server"
+        )
+    if timeout <= 0:
+        raise RuntimeSmokeError(
+            "timeout must be greater than zero"
+        )
+    if not isinstance(tool_name, str) or not tool_name.strip():
+        raise RuntimeSmokeError(
+            "tool_name must be a non-empty string"
+        )
+    if not isinstance(arguments, dict):
+        raise RuntimeSmokeError(
+            "tool arguments must be an object"
+        )
+    if not isinstance(credential, dict):
+        raise RuntimeSmokeError(
+            "credential profile must be an object"
+        )
+
+    kind = credential.get("kind")
+    if kind not in {"configured", "anonymous", "bearer_env"}:
+        raise RuntimeSmokeError(
+            "credential kind must be configured, anonymous, or bearer_env"
+        )
+
+    _manifest_path, config = _load_mcp_config(root)
+    server_name, declaration = _select_server(
+        config,
+        server,
+    )
+    transport = _transport_kind(declaration)
+    if transport != "streamable-http":
+        raise RuntimeSmokeError(
+            "credential matrix replay requires a streamable-http MCP server"
+        )
+
+    configured = _ModernHttpClient(
+        declaration,
+        timeout,
+        include_auth=True,
+    )
+    discover = configured.request(
+        "server/discover",
+        {},
+        modern=True,
+    )
+    if "result" not in discover:
+        raise RuntimeSmokeError(
+            "server/discover failed: "
+            + _rpc_error_text(discover)
+        )
+    tools_message = configured.request(
+        "tools/list",
+        {},
+        modern=True,
+    )
+    if "result" not in tools_message:
+        raise RuntimeSmokeError(
+            "tools/list failed: "
+            + _rpc_error_text(tools_message)
+        )
+    descriptor = _find_read_only_tool_descriptor(
+        tools_message,
+        tool_name,
+    )
+
+    if kind == "configured":
+        call_client = configured
+    elif kind == "anonymous":
+        call_client = _ModernHttpClient(
+            declaration,
+            timeout,
+            include_auth=False,
+        )
+    else:
+        env_name = credential.get("env")
+        if not isinstance(env_name, str) or not env_name.strip():
+            raise RuntimeSmokeError(
+                "bearer_env credential requires a non-empty env name"
+            )
+        token = os.environ.get(env_name)
+        if not token:
+            raise RuntimeSmokeError(
+                f"required credential environment variable is missing: {env_name}"
+            )
+        call_client = _ModernHttpClient(
+            declaration,
+            timeout,
+            include_auth=False,
+        )
+        call_client.headers["Authorization"] = (
+            f"Bearer {token}"
+        )
+
+    observation = call_client.request_observed(
+        "tools/call",
+        {
+            "name": tool_name,
+            "arguments": arguments,
+        },
+        modern=True,
+    )
+    return {
+        "server": server_name,
+        "transport": transport,
+        "credential_kind": kind,
+        "protocol_version": MODERN_PROTOCOL,
+        "era": "modern",
+        "descriptor": descriptor,
+        "transport_observation": observation,
+    }
+
+
 def _call_tool_stdio(
     root: Path,
     declaration: dict[str, Any],

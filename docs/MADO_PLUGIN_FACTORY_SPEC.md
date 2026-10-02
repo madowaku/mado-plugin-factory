@@ -1,6 +1,6 @@
-# MADO_PLUGIN_FACTORY_SPEC.md v1.6
+# MADO_PLUGIN_FACTORY_SPEC.md v1.7
 
-Status: Implemented through M1.6  
+Status: Implemented through M1.7  
 Project: MADO Plugin Factory  
 Repository: `madowaku/mado-plugin-factory`
 
@@ -58,6 +58,9 @@ Behavioral Contract Replay / Remote MCP Canary <- M1.5 complete
   |
   v
 Authorization / Negative Contract Replay <- M1.6 complete
+  |
+  v
+Credential Matrix / Scope Boundary Replay <- M1.7 complete
 ```
 
 The factory separates "generated", "inspected", and "executed" evidence and refuses to turn missing proof into a release claim.
@@ -1420,7 +1423,184 @@ These files remain outside `plugin.zip`.
 
 M1.6 validates only declared read-only negative fixtures and the anonymous/no-`Authorization` boundary for HTTP MCP tools. It does not automatically execute write/destructive tools, brute-force rate limits, test all account roles/scopes, or prove complete authorization correctness.
 
-## 18. Safety rules
+## 18. MPF-M1.7 Credential Matrix / Scope Boundary Replay
+
+Status: complete.
+
+### 18.1 Goal
+
+Verify role/scope/account-state authorization boundaries across multiple credentials without storing access tokens or executing write/destructive tools.
+
+M1.7 extends M1.6 from the anonymous/no-Authorization edge into an explicit matrix of credential profiles such as viewer, editor, admin, expired token, wrong audience, and missing scope.
+
+### 18.2 Credential profiles
+
+Credential contracts support exactly three profile kinds:
+
+- `configured`: reuse the authorization configured for the MCP server in `mcp.json`
+- `anonymous`: perform the canary call without `Authorization`
+- `bearer_env`: obtain a bearer token from an environment variable at execution time
+
+Raw token fields are not supported in contract JSON. Unknown profile fields are rejected.
+
+For `bearer_env`, the environment variable name exists only in the input contract and in process memory. Executed evidence stores only the credential profile ID/kind and a SHA-256 of the complete credential-definition map; it does not persist environment variable names or token values.
+
+### 18.3 Contract template
+
+Start from:
+
+```text
+templates/credentials/matrix.json
+```
+
+Each case declares:
+
+- stable case ID
+- credential profile ID
+- read-only MCP tool
+- fixture arguments
+- expected outcome: `success`, `tool_error`, `protocol_error`, or `http_error`
+- optional HTTP status or protocol error code
+- authentication-challenge requirement
+- structured-content presence requirement
+- expected content types
+- optional stable paths within structured content
+
+### 18.4 Execution model
+
+M1.7 supports modern streamable-HTTP MCP only.
+
+For every case it:
+
+1. connects using the normally configured MCP credential
+2. performs discovery/tool listing
+3. verifies the target tool advertises `annotations.readOnlyHint=true`
+4. creates the requested credential context
+5. executes one `tools/call`
+6. records a privacy-reduced observation
+
+The descriptor inspection therefore does not depend on whether the credential under test is allowed to list tools.
+
+### 18.5 Scope-boundary examples
+
+A single matrix can express boundaries such as:
+
+- anonymous → 401 + challenge
+- viewer → normal read success
+- viewer → admin-only read denied
+- editor → read success
+- admin → privileged read success
+- expired token → 401 + challenge
+- wrong audience → 401 + challenge
+- missing scope → authorization failure
+
+These are examples, not hard-coded roles. Product teams define the profile IDs and expected boundaries appropriate to their authorization model.
+
+### 18.6 Record baseline
+
+```bash
+mpf credential-matrix <plugin-root> \
+  --contract ./credential-matrix.json \
+  --verification-evidence evidence/verifications/extensions/<id>/dossier.json \
+  --write-evidence
+```
+
+Evidence is written under:
+
+```text
+evidence/credentials/extensions/<matrix-id>.json
+```
+
+When a verification dossier is supplied, the baseline stores its verification ID and dossier SHA-256.
+
+### 18.7 Replay
+
+```bash
+mpf credential-matrix <plugin-root> \
+  --contract ./credential-matrix.json \
+  --baseline evidence/credentials/extensions/<baseline-id>.json \
+  --verification-evidence evidence/verifications/extensions/<id>/dossier.json
+```
+
+Replay requires:
+
+- identical contract SHA-256
+- identical credential-definition SHA-256
+- identical M1.2 dossier SHA-256 when verification binding is supplied
+- each case expectation still passes
+- each behavior SHA-256 still matches the baseline
+
+### 18.8 Privacy-reduced observations
+
+M1.7 evidence records:
+
+- credential profile ID and kind
+- argument SHA-256
+- outcome class
+- HTTP status
+- protocol error code
+- authentication-challenge presence/hash
+- content types
+- recursive structured-content type/key shape
+- hashes of explicitly declared stable-path values
+- overall behavior SHA-256
+
+It does not persist access tokens, raw arguments, environment variable names, raw HTTP bodies, challenge text, tool-result values, or error messages.
+
+### 18.9 Drift semantics
+
+Examples of credential-boundary drift include:
+
+- viewer changes from success to denial
+- viewer unexpectedly gains admin-only access
+- expired/wrong-audience token starts succeeding
+- missing-scope response loses its challenge
+- authorization status changes
+- successful result shape changes
+- declared stable-path values change
+
+M1.7 reports these as case blockers and, during replay, `credential_boundary_drift`.
+
+### 18.10 Promotion integration
+
+Credential Matrix promotion is opt-in:
+
+```bash
+mpf promote <plugin-root> \
+  --verification-evidence evidence/verifications/extensions/<id>/dossier.json \
+  --credential-matrix ./credential-matrix.json \
+  --credential-baseline evidence/credentials/extensions/<baseline-id>.json
+```
+
+Both flags are required together.
+
+Live promotion ordering becomes:
+
+1. M1.3 package/evidence gate
+2. M1.4 advertised-surface freshness
+3. optional M1.5 positive behavioral replay
+4. optional M1.6 negative/authorization replay
+5. optional M1.7 credential/scope matrix replay
+6. promotion verdict
+
+A failed replay adds `verification_credential_matrix_stale`.
+
+### 18.11 Promoted release evidence
+
+When M1.7 promotion is enabled, the release evidence directory additionally contains:
+
+```text
+verification/credential-matrix-baseline.json
+verification/credential-matrix-replay.json
+```
+
+These files remain outside `plugin.zip`.
+
+### 18.12 Scope boundary
+
+M1.7 verifies only declared read-only HTTP fixtures and credential profiles. It does not automatically execute write/destructive tools, discover all real-world roles, enumerate every OAuth scope, or prove organization/workspace policy correctness.
+
+## 19. Safety rules
 
 M0.5 MUST NOT:
 
@@ -1435,7 +1615,7 @@ M0.5 MUST NOT:
 - write outside the plugin root
 - silently overwrite a differing release bundle
 
-## 19. Acceptance
+## 20. Acceptance
 
 MPF-M0.5 is complete when:
 
@@ -1633,7 +1813,26 @@ MPF-M1.6 is complete when:
 - negative baseline/replay evidence remains outside the plugin ZIP
 - unit/CI tests cover invalid/not-found/recoverable failures, unexpected success, unsafe-tool pre-call refusal, 401 challenge behavior, privacy, verification binding, CLI record/replay, promotion blocking, and promoted evidence isolation
 
-## 20. North star
+### MPF-M1.7 acceptance
+
+MPF-M1.7 is complete when:
+
+- one command records a credential/scope matrix and one command replays it
+- configured, anonymous, and bearer-env profiles are supported without raw-token contract fields
+- bearer-env values are loaded only at execution time
+- executed evidence omits token values and credential environment-variable names
+- only explicitly read-only streamable-HTTP tools can reach `tools/call`
+- allow and deny expectations are expressible for the same tool across multiple profiles
+- success, tool-error, protocol-error, and HTTP-error outcomes are supported
+- 401/403 and authentication-challenge behavior can be asserted
+- contract/profile drift invalidates an old baseline
+- credential baselines can be SHA-bound to the exact M1.2 verification dossier
+- role/scope drift is detected even when M1.4 advertised metadata remains unchanged
+- live promotion can optionally require the M1.7 matrix
+- credential baseline/replay evidence remains outside the plugin ZIP
+- unit/CI tests cover viewer/editor/admin/anonymous/expired/wrong-audience/missing-scope boundaries, drift, privacy, raw-secret rejection, verification binding, unsafe-tool pre-call refusal, and CLI record/replay
+
+## 21. North star
 
 ```text
 "I have a useful Skill"
