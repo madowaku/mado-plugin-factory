@@ -10,9 +10,11 @@ from .marketplace import (
     verify_marketplace_install,
 )
 from .scanner import scan_candidate
+from .scaffold import compile_extension_scaffold
 
 __all__ = [
     "compile_extension_capabilities",
+    "compile_extension_scaffold",
     "compile_manifest",
     "compile_marketplace_bridge",
     "compile_submission_bundle",
@@ -23,4 +25,4 @@ __all__ = [
     "validate_submission_evals",
     "verify_marketplace_install",
 ]
-__version__ = "0.6.0"
+__version__ = "0.7.0"

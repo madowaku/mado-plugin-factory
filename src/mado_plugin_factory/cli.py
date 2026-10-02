@@ -39,6 +39,13 @@ from .marketplace import (
     write_marketplace_bridge,
 )
 from .scanner import ScanError, scan_candidate
+from .scaffold import (
+    DEFAULT_OUTPUT as DEFAULT_SCAFFOLD_OUTPUT,
+    ScaffoldError,
+    compile_extension_scaffold,
+    write_extension_scaffold,
+    public_scaffold_report,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -64,6 +71,30 @@ def build_parser() -> argparse.ArgumentParser:
     extensions.add_argument("--write", action="store_true", help="Write the inspected extension capability report")
     extensions.add_argument("--force", action="store_true", help="Replace a differing extension report")
     extensions.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
+
+    scaffold = sub.add_parser("scaffold", help="Generate reviewable extension scaffold artifacts")
+    scaffold.add_argument("path", nargs="?", default=".", help="Candidate directory (default: .)")
+    scaffold.add_argument(
+        "--extension",
+        action="append",
+        dest="extensions",
+        help="Extension id to scaffold; repeat to select multiple. Defaults to all actionable capabilities.",
+    )
+    scaffold.add_argument(
+        "--file-extension",
+        action="append",
+        dest="file_extensions",
+        default=[],
+        help="File suffix for file_viewer_editor, e.g. .stl; repeat for multiple.",
+    )
+    scaffold.add_argument(
+        "--output",
+        default=DEFAULT_SCAFFOLD_OUTPUT,
+        help=f"Relative scaffold directory (default: {DEFAULT_SCAFFOLD_OUTPUT})",
+    )
+    scaffold.add_argument("--write", action="store_true", help="Write the generated scaffold pack")
+    scaffold.add_argument("--force", action="store_true", help="Replace differing scaffold files")
+    scaffold.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
 
     manifest = sub.add_parser("manifest", help="Compile a portable plugin.json manifest")
     manifest.add_argument("path", nargs="?", default=".", help="Candidate directory (default: .)")
@@ -186,6 +217,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_scan(args)
     if args.command == "extensions":
         return _run_extensions(args)
+    if args.command == "scaffold":
+        return _run_scaffold(args)
     if args.command == "manifest":
         return _run_manifest(args)
     if args.command == "evals":
@@ -229,6 +262,28 @@ def _run_extensions(args: argparse.Namespace) -> int:
 
     _print_json(report, pretty=args.pretty)
     return 0 if report["summary"]["actionable_count"] > 0 else 2
+
+
+def _run_scaffold(args: argparse.Namespace) -> int:
+    try:
+        report = compile_extension_scaffold(
+            Path(args.path),
+            extensions=args.extensions,
+            file_extensions=args.file_extensions,
+            output=args.output,
+        )
+        if args.write:
+            report["written"] = write_extension_scaffold(
+                Path(args.path),
+                report,
+                force=args.force,
+            )
+    except (ScaffoldError, ExtensionError, ScanError) as exc:
+        _print_error(str(exc))
+        return 1
+
+    _print_json(public_scaffold_report(report), pretty=args.pretty)
+    return 0 if report["summary"]["generated_count"] > 0 else 2
 
 
 def _run_manifest(args: argparse.Namespace) -> int:
