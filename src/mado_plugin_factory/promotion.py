@@ -6,6 +6,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from .behavior import CanaryError, run_behavior_canary
 from .bundle import (
     DEFAULT_EVAL_EVIDENCE,
     DEFAULT_INSTALL_EVIDENCE,
@@ -36,7 +37,14 @@ def run_verification_promotion(
     server: str | None = None,
     runtime_mode: str = "auto",
     timeout: float = 5.0,
+    canary_contract: str | None = None,
+    canary_baseline: str | None = None,
 ) -> dict[str, Any]:
+    if bool(canary_contract) != bool(canary_baseline):
+        raise PromotionError(
+            "behavior canary promotion requires both canary_contract and canary_baseline"
+        )
+
     try:
         freshness = run_verification_freshness(
             root,
@@ -49,6 +57,31 @@ def run_verification_promotion(
     except FreshnessError as exc:
         raise PromotionError(str(exc)) from exc
 
+    behavior = None
+    baseline_payload = None
+    if canary_contract and canary_baseline:
+        try:
+            behavior = run_behavior_canary(
+                root,
+                contract=canary_contract,
+                baseline_evidence=canary_baseline,
+                server=server,
+                mode=runtime_mode,
+                timeout=timeout,
+                write_evidence=False,
+            )
+            baseline_path = _safe_existing_file(
+                root,
+                canary_baseline,
+                label="canary baseline evidence",
+            )
+            baseline_payload = _load_json_object(
+                baseline_path,
+                "canary baseline evidence",
+            )
+        except CanaryError as exc:
+            raise PromotionError(str(exc)) from exc
+
     return compile_verification_promotion(
         root,
         release_metadata=release_metadata,
@@ -58,6 +91,9 @@ def run_verification_promotion(
         install_evidence=install_evidence,
         freshness_report=freshness,
         enforce_freshness=True,
+        behavior_report=behavior,
+        enforce_behavior=bool(behavior),
+        canary_baseline_payload=baseline_payload,
     )
 
 
@@ -71,6 +107,9 @@ def compile_verification_promotion(
     install_evidence: str = DEFAULT_INSTALL_EVIDENCE,
     freshness_report: dict[str, Any] | None = None,
     enforce_freshness: bool = False,
+    behavior_report: dict[str, Any] | None = None,
+    enforce_behavior: bool = False,
+    canary_baseline_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     root = root.expanduser().resolve()
     if not root.exists() or not root.is_dir():
@@ -148,12 +187,32 @@ def compile_verification_promotion(
                 "scope": freshness_report.get("scope"),
             }
 
+    behavior_valid = True
+    behavior_summary: dict[str, Any] | None = None
+    if enforce_behavior:
+        behavior_valid = bool(
+            isinstance(behavior_report, dict)
+            and behavior_report.get("mode") == "replay"
+            and behavior_report.get("canary_verified") is True
+        )
+        if isinstance(behavior_report, dict):
+            behavior_summary = {
+                "canary_id": behavior_report.get("canary_id"),
+                "canary_verified": behavior_report.get("canary_verified") is True,
+                "canary_passed": behavior_report.get("canary_passed") is True,
+                "blocking_reasons": behavior_report.get("blocking_reasons") or [],
+                "scope": behavior_report.get("scope"),
+                "contract": deepcopy(behavior_report.get("contract") or {}),
+                "baseline": deepcopy(behavior_report.get("baseline") or {}),
+            }
+
     gate_passed = bool(
         validation["valid"]
         and package_bound
         and verification_verified
         and state_satisfies
         and freshness_valid
+        and behavior_valid
     )
 
     verification_blockers: list[str] = []
@@ -197,6 +256,15 @@ def compile_verification_promotion(
                 verification_blockers.append(
                     "verification_freshness_dossier_mismatch"
                 )
+    if enforce_behavior:
+        if not isinstance(behavior_report, dict):
+            verification_blockers.append(
+                "verification_behavior_canary_missing"
+            )
+        elif not behavior_report.get("canary_verified"):
+            verification_blockers.append(
+                "verification_behavior_canary_stale"
+            )
     verification_blockers = _unique(verification_blockers)
 
     try:
@@ -222,6 +290,11 @@ def compile_verification_promotion(
         freshness_id=(
             freshness_report.get("freshness_id")
             if isinstance(freshness_report, dict)
+            else None
+        ),
+        canary_id=(
+            behavior_report.get("canary_id")
+            if isinstance(behavior_report, dict)
             else None
         ),
     )
@@ -253,6 +326,8 @@ def compile_verification_promotion(
         "artifact_integrity": validation,
         "freshness_required": enforce_freshness,
         "freshness": freshness_summary,
+        "behavior_canary_required": enforce_behavior,
+        "behavior_canary": behavior_summary,
         "passed": gate_passed,
     }
 
@@ -283,6 +358,13 @@ def compile_verification_promotion(
         promoted_bundle["artifacts"][
             "freshness_report"
         ] = "verification/freshness.json"
+    if enforce_behavior:
+        promoted_bundle["artifacts"][
+            "canary_replay"
+        ] = "verification/canary-replay.json"
+        promoted_bundle["artifacts"][
+            "canary_baseline"
+        ] = "verification/canary-baseline.json"
 
     return {
         "schema_version": SCHEMA_VERSION,
@@ -316,6 +398,12 @@ def compile_verification_promotion(
         ],
         "_freshness_report": deepcopy(freshness_report)
         if isinstance(freshness_report, dict)
+        else None,
+        "_behavior_report": deepcopy(behavior_report)
+        if isinstance(behavior_report, dict)
+        else None,
+        "_canary_baseline": deepcopy(canary_baseline_payload)
+        if isinstance(canary_baseline_payload, dict)
         else None,
     }
 
@@ -357,6 +445,8 @@ def write_promoted_release(
         "_verification_artifacts"
     )
     freshness_report = report.get("_freshness_report")
+    behavior_report = report.get("_behavior_report")
+    canary_baseline = report.get("_canary_baseline")
     if not isinstance(dossier, dict):
         raise PromotionError(
             "promotion report is missing verification dossier"
@@ -382,6 +472,14 @@ def write_promoted_release(
     if isinstance(freshness_report, dict):
         extra["verification/freshness.json"] = _json_bytes(
             freshness_report
+        )
+    if isinstance(behavior_report, dict):
+        extra["verification/canary-replay.json"] = _json_bytes(
+            behavior_report
+        )
+    if isinstance(canary_baseline, dict):
+        extra["verification/canary-baseline.json"] = _json_bytes(
+            canary_baseline
         )
 
     written: list[str] = []
@@ -429,6 +527,8 @@ def public_promotion_report(
             "_verification_dossier",
             "_verification_artifacts",
             "_freshness_report",
+            "_behavior_report",
+            "_canary_baseline",
         }
     }
 
@@ -601,6 +701,7 @@ def _promotion_id(
     dossier_sha256: str,
     requirement: str,
     freshness_id: str | None,
+    canary_id: str | None,
 ) -> str:
     payload = {
         "bundle_id": bundle_id,
@@ -608,6 +709,7 @@ def _promotion_id(
         "dossier_sha256": dossier_sha256,
         "requirement": requirement,
         "freshness_id": freshness_id,
+        "canary_id": canary_id,
     }
     return hashlib.sha256(
         json.dumps(
