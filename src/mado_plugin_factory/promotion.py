@@ -14,6 +14,7 @@ from .bundle import (
     compile_submission_bundle,
     write_submission_bundle,
 )
+from .credentials import CredentialMatrixError, run_credential_matrix
 from .freshness import FreshnessError, run_verification_freshness
 from .marketplace import plugin_package_digest
 from .negative import NegativeContractError, run_negative_contract
@@ -42,6 +43,8 @@ def run_verification_promotion(
     canary_baseline: str | None = None,
     negative_contract: str | None = None,
     negative_baseline: str | None = None,
+    credential_matrix: str | None = None,
+    credential_baseline: str | None = None,
 ) -> dict[str, Any]:
     if bool(canary_contract) != bool(canary_baseline):
         raise PromotionError(
@@ -50,6 +53,10 @@ def run_verification_promotion(
     if bool(negative_contract) != bool(negative_baseline):
         raise PromotionError(
             "negative contract promotion requires both negative_contract and negative_baseline"
+        )
+    if bool(credential_matrix) != bool(credential_baseline):
+        raise PromotionError(
+            "credential matrix promotion requires both credential_matrix and credential_baseline"
         )
 
     try:
@@ -116,6 +123,32 @@ def run_verification_promotion(
         except NegativeContractError as exc:
             raise PromotionError(str(exc)) from exc
 
+    credential_report = None
+    credential_baseline_payload = None
+    if credential_matrix and credential_baseline:
+        try:
+            credential_report = run_credential_matrix(
+                root,
+                contract=credential_matrix,
+                baseline_evidence=credential_baseline,
+                verification_evidence=verification_evidence,
+                server=server,
+                mode=runtime_mode,
+                timeout=timeout,
+                write_evidence=False,
+            )
+            credential_baseline_path = _safe_existing_file(
+                root,
+                credential_baseline,
+                label="credential matrix baseline",
+            )
+            credential_baseline_payload = _load_json_object(
+                credential_baseline_path,
+                "credential matrix baseline",
+            )
+        except CredentialMatrixError as exc:
+            raise PromotionError(str(exc)) from exc
+
     return compile_verification_promotion(
         root,
         release_metadata=release_metadata,
@@ -131,6 +164,9 @@ def run_verification_promotion(
         negative_report=negative,
         enforce_negative=bool(negative),
         negative_baseline_payload=negative_baseline_payload,
+        credential_report=credential_report,
+        enforce_credentials=bool(credential_report),
+        credential_baseline_payload=credential_baseline_payload,
     )
 
 
@@ -150,6 +186,9 @@ def compile_verification_promotion(
     negative_report: dict[str, Any] | None = None,
     enforce_negative: bool = False,
     negative_baseline_payload: dict[str, Any] | None = None,
+    credential_report: dict[str, Any] | None = None,
+    enforce_credentials: bool = False,
+    credential_baseline_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     root = root.expanduser().resolve()
     if not root.exists() or not root.is_dir():
@@ -265,6 +304,25 @@ def compile_verification_promotion(
                 "baseline": deepcopy(negative_report.get("baseline") or {}),
             }
 
+    credential_valid = True
+    credential_summary: dict[str, Any] | None = None
+    if enforce_credentials:
+        credential_valid = bool(
+            isinstance(credential_report, dict)
+            and credential_report.get("mode") == "replay"
+            and credential_report.get("matrix_verified") is True
+        )
+        if isinstance(credential_report, dict):
+            credential_summary = {
+                "matrix_id": credential_report.get("matrix_id"),
+                "matrix_verified": credential_report.get("matrix_verified") is True,
+                "matrix_passed": credential_report.get("matrix_passed") is True,
+                "blocking_reasons": credential_report.get("blocking_reasons") or [],
+                "scope": credential_report.get("scope"),
+                "contract": deepcopy(credential_report.get("contract") or {}),
+                "baseline": deepcopy(credential_report.get("baseline") or {}),
+            }
+
     gate_passed = bool(
         validation["valid"]
         and package_bound
@@ -273,6 +331,7 @@ def compile_verification_promotion(
         and freshness_valid
         and behavior_valid
         and negative_valid
+        and credential_valid
     )
 
     verification_blockers: list[str] = []
@@ -334,6 +393,15 @@ def compile_verification_promotion(
             verification_blockers.append(
                 "verification_negative_contract_stale"
             )
+    if enforce_credentials:
+        if not isinstance(credential_report, dict):
+            verification_blockers.append(
+                "verification_credential_matrix_missing"
+            )
+        elif not credential_report.get("matrix_verified"):
+            verification_blockers.append(
+                "verification_credential_matrix_stale"
+            )
     verification_blockers = _unique(verification_blockers)
 
     try:
@@ -371,6 +439,11 @@ def compile_verification_promotion(
             if isinstance(negative_report, dict)
             else None
         ),
+        matrix_id=(
+            credential_report.get("matrix_id")
+            if isinstance(credential_report, dict)
+            else None
+        ),
     )
 
     promotion_ready = bool(
@@ -404,6 +477,8 @@ def compile_verification_promotion(
         "behavior_canary": behavior_summary,
         "negative_contract_required": enforce_negative,
         "negative_contract": negative_summary,
+        "credential_matrix_required": enforce_credentials,
+        "credential_matrix": credential_summary,
         "passed": gate_passed,
     }
 
@@ -448,6 +523,13 @@ def compile_verification_promotion(
         promoted_bundle["artifacts"][
             "negative_baseline"
         ] = "verification/negative-baseline.json"
+    if enforce_credentials:
+        promoted_bundle["artifacts"][
+            "credential_matrix_replay"
+        ] = "verification/credential-matrix-replay.json"
+        promoted_bundle["artifacts"][
+            "credential_matrix_baseline"
+        ] = "verification/credential-matrix-baseline.json"
 
     return {
         "schema_version": SCHEMA_VERSION,
@@ -494,6 +576,12 @@ def compile_verification_promotion(
         "_negative_baseline": deepcopy(negative_baseline_payload)
         if isinstance(negative_baseline_payload, dict)
         else None,
+        "_credential_report": deepcopy(credential_report)
+        if isinstance(credential_report, dict)
+        else None,
+        "_credential_baseline": deepcopy(credential_baseline_payload)
+        if isinstance(credential_baseline_payload, dict)
+        else None,
     }
 
 
@@ -538,6 +626,8 @@ def write_promoted_release(
     canary_baseline = report.get("_canary_baseline")
     negative_report = report.get("_negative_report")
     negative_baseline = report.get("_negative_baseline")
+    credential_report = report.get("_credential_report")
+    credential_baseline = report.get("_credential_baseline")
     if not isinstance(dossier, dict):
         raise PromotionError(
             "promotion report is missing verification dossier"
@@ -579,6 +669,14 @@ def write_promoted_release(
     if isinstance(negative_baseline, dict):
         extra["verification/negative-baseline.json"] = _json_bytes(
             negative_baseline
+        )
+    if isinstance(credential_report, dict):
+        extra["verification/credential-matrix-replay.json"] = _json_bytes(
+            credential_report
+        )
+    if isinstance(credential_baseline, dict):
+        extra["verification/credential-matrix-baseline.json"] = _json_bytes(
+            credential_baseline
         )
 
     written: list[str] = []
@@ -630,6 +728,8 @@ def public_promotion_report(
             "_canary_baseline",
             "_negative_report",
             "_negative_baseline",
+            "_credential_report",
+            "_credential_baseline",
         }
     }
 
@@ -804,6 +904,7 @@ def _promotion_id(
     freshness_id: str | None,
     canary_id: str | None,
     negative_id: str | None,
+    matrix_id: str | None,
 ) -> str:
     payload = {
         "bundle_id": bundle_id,
@@ -813,6 +914,7 @@ def _promotion_id(
         "freshness_id": freshness_id,
         "canary_id": canary_id,
         "negative_id": negative_id,
+        "matrix_id": matrix_id,
     }
     return hashlib.sha256(
         json.dumps(
