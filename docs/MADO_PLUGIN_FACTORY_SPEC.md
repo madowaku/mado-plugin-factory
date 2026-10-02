@@ -1,6 +1,6 @@
-# MADO_PLUGIN_FACTORY_SPEC.md v1.7
+# MADO_PLUGIN_FACTORY_SPEC.md v1.8
 
-Status: Implemented through M1.7  
+Status: Implemented through M1.8  
 Project: MADO Plugin Factory  
 Repository: `madowaku/mado-plugin-factory`
 
@@ -61,6 +61,9 @@ Authorization / Negative Contract Replay <- M1.6 complete
   |
   v
 Credential Matrix / Scope Boundary Replay <- M1.7 complete
+  |
+  v
+Least-Privilege / Security Scheme Contract Gate <- M1.8 complete
 ```
 
 The factory separates "generated", "inspected", and "executed" evidence and refuses to turn missing proof into a release claim.
@@ -1600,7 +1603,186 @@ These files remain outside `plugin.zip`.
 
 M1.7 verifies only declared read-only HTTP fixtures and credential profiles. It does not automatically execute write/destructive tools, discover all real-world roles, enumerate every OAuth scope, or prove organization/workspace policy correctness.
 
-## 19. Safety rules
+## 19. MPF-M1.8 Least-Privilege / Security Scheme Contract Gate
+
+Status: complete.
+
+### 19.1 Goal
+
+Compare live per-tool MCP `securitySchemes` with observed allow/deny scope evidence from a verified M1.7 credential matrix, and block release promotion when declarations request unnecessary scopes, omit an observed scope requirement, or advertise the wrong authentication mode.
+
+### 19.2 Official contract alignment
+
+M1.8 models per-tool declarations with the currently supported OpenAI/MCP security scheme types:
+
+- `noauth`
+- `oauth2` with an explicit scope list
+
+Multiple schemes are treated as alternatives. A `noauth` plus `oauth2` declaration represents optional authentication.
+
+The declaration is metadata only. Runtime authorization remains the MCP server's responsibility and is tested separately by M1.6/M1.7.
+
+### 19.3 Security contract
+
+Start from:
+
+```text
+templates/security/contract.json
+```
+
+The contract contains only public authorization-model metadata:
+
+- profile IDs
+- profile auth class: `anonymous` or `oauth`
+- asserted OAuth scope labels
+- per-tool access mode
+- M1.7 sufficient-case IDs
+- M1.7 insufficient-scope-case IDs
+
+Supported access modes:
+
+- `oauth_required`
+- `optional_auth`
+- `noauth`
+
+### 19.4 Standalone CLI
+
+```bash
+mpf security-gate <plugin-root> \
+  --contract ./security-contract.json \
+  --matrix-evidence evidence/credentials/extensions/<matrix-id>.json \
+  --write-evidence
+```
+
+The selected matrix evidence must be:
+
+- `evidence_state=executed`
+- `mode=replay`
+- `matrix_verified=true`
+
+M1.8 re-probes the live MCP server and reads current tool descriptors rather than trusting the historical matrix descriptor.
+
+### 19.5 Access-mode checks
+
+For each tool:
+
+`oauth_required` requires at least one `oauth2` scheme and forbids `noauth`.
+
+`optional_auth` requires both `noauth` and `oauth2`.
+
+`noauth` requires `noauth` and rejects OAuth-only declaration in the M1.8 contract.
+
+Unsupported/unknown security scheme types block the gate.
+
+### 19.6 Sufficient-scope evidence
+
+Each `sufficient_case` references a verified M1.7 case for the same tool.
+
+The case must currently have a successful outcome.
+
+For an OAuth-authenticated profile, at least one advertised OAuth alternative must be a subset of the profile's asserted scope set.
+
+If a successful profile does not contain all scopes of any advertised OAuth alternative, M1.8 reports:
+
+```text
+declared_scope_not_supported_by_success
+```
+
+This detects a descriptor that requests more permission than the observed successful credential requires.
+
+For an anonymous sufficient case, the access policy must allow anonymous access and the live descriptor must advertise `noauth`.
+
+### 19.7 Insufficient-scope evidence
+
+Each `insufficient_scope_case` must reference an OAuth profile that is intentionally denied because its OAuth scope set is insufficient.
+
+If that denied profile already contains every scope of an advertised OAuth alternative, the runtime appears to require an undeclared permission or hidden scope.
+
+M1.8 reports:
+
+```text
+runtime_requires_undeclared_permission
+```
+
+Role, organization, ownership, row-level policy, token expiry, wrong audience, and similar non-scope denials must not be used as insufficient-scope evidence.
+
+### 19.8 Alternative-scheme support
+
+Each advertised OAuth alternative must have at least one successful OAuth case whose asserted profile scopes contain that alternative.
+
+An alternative with no supporting success evidence reports:
+
+```text
+declared_oauth_alternative_has_no_success_evidence
+```
+
+This prevents dead or gratuitously privileged OAuth alternatives from silently passing the gate.
+
+### 19.9 Evidence
+
+Default output:
+
+```text
+evidence/security/extensions/<gate-id>.json
+```
+
+Evidence includes:
+
+- security contract SHA-256
+- verified matrix ID/SHA-256
+- live runtime smoke/fingerprint IDs
+- normalized per-tool `securitySchemes`
+- declared scope alternatives
+- supporting sufficient cases
+- insufficient-scope cases
+- per-tool blocker reasons
+- overall gate verdict
+
+Scope names may be stored because they are permission labels. Tokens and credential environment-variable names are never persisted.
+
+### 19.10 Promotion integration
+
+M1.8 promotion is opt-in and depends on M1.7:
+
+```bash
+mpf promote <plugin-root> \
+  --verification-evidence evidence/verifications/extensions/<id>/dossier.json \
+  --credential-matrix ./credential-matrix.json \
+  --credential-baseline evidence/credentials/extensions/<baseline-id>.json \
+  --security-contract ./security-contract.json
+```
+
+Live promotion ordering becomes:
+
+1. M1.3 package/evidence gate
+2. M1.4 advertised-surface freshness
+3. optional M1.5 positive behavioral replay
+4. optional M1.6 negative/authorization replay
+5. optional M1.7 credential/scope matrix replay
+6. optional M1.8 least-privilege/security-scheme contract gate
+7. promotion verdict
+
+A failed M1.8 gate adds:
+
+```text
+verification_security_scheme_contract_failed
+```
+
+### 19.11 Promoted release evidence
+
+When enabled, promoted evidence adds:
+
+```text
+verification/security-scheme-gate.json
+```
+
+The file remains outside `plugin.zip`.
+
+### 19.12 Scope boundary
+
+M1.8 checks evidence-backed OAuth declarations. It does not infer hidden business roles or claim that the mathematical intersection of successful credentials is the unique globally minimal permission set. Teams explicitly identify which denied M1.7 cases are scope-related.
+
+## 20. Safety rules
 
 M0.5 MUST NOT:
 
@@ -1615,7 +1797,7 @@ M0.5 MUST NOT:
 - write outside the plugin root
 - silently overwrite a differing release bundle
 
-## 20. Acceptance
+## 21. Acceptance
 
 MPF-M0.5 is complete when:
 
@@ -1832,7 +2014,24 @@ MPF-M1.7 is complete when:
 - credential baseline/replay evidence remains outside the plugin ZIP
 - unit/CI tests cover viewer/editor/admin/anonymous/expired/wrong-audience/missing-scope boundaries, drift, privacy, raw-secret rejection, verification binding, unsafe-tool pre-call refusal, and CLI record/replay
 
-## 21. North star
+### MPF-M1.8 acceptance
+
+MPF-M1.8 is complete when:
+
+- one command compares a verified M1.7 matrix with live per-tool security schemes
+- noauth, oauth-required, and optional-auth declarations are modeled explicitly
+- successful OAuth cases prove advertised scope alternatives are not over-declared
+- intentionally insufficient-scope cases detect hidden/undeclared runtime permission requirements
+- every advertised OAuth alternative requires positive success evidence
+- anonymous success is validated against noauth declaration rather than OAuth scope inference
+- role/policy denials are kept separate from scope-insufficiency evidence
+- unsupported security scheme types fail closed
+- the gate re-probes live descriptors instead of trusting historical declarations
+- promotion can optionally require M1.8 after M1.7
+- security-scheme evidence remains outside the plugin ZIP
+- unit/CI tests cover valid least privilege, over-declaration, undeclared permission requirements, auth-mode mismatch, optional-auth alternatives, unverified matrices, CLI evidence writes, promotion blocking, and release-evidence isolation
+
+## 22. North star
 
 ```text
 "I have a useful Skill"
