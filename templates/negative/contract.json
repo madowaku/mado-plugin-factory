@@ -1,0 +1,33 @@
+{
+  "schema_version": "0.1",
+  "server": "replace-with-server-name",
+  "cases": [
+    {
+      "id": "invalid-input",
+      "category": "invalid_input",
+      "tool": "replace-with-read-only-tool",
+      "arguments": {},
+      "expect": {
+        "outcome": "protocol_error",
+        "protocol_error_code": -32602,
+        "structured_content": "forbidden",
+        "content_types": [],
+        "auth_challenge": "optional"
+      }
+    },
+    {
+      "id": "unauthorized",
+      "category": "unauthorized",
+      "tool": "replace-with-private-read-only-tool",
+      "request_context": "anonymous",
+      "arguments": {},
+      "expect": {
+        "outcome": "http_error",
+        "http_status": 401,
+        "auth_challenge": "required",
+        "structured_content": "forbidden",
+        "content_types": []
+      }
+    }
+  ]
+}
