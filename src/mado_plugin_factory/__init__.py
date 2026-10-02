@@ -10,6 +10,7 @@ from .marketplace import (
     verify_marketplace_install,
 )
 from .patch import apply_extension_patch, compile_extension_patch
+from .runtime import run_extension_runtime_smoke
 from .scanner import scan_candidate
 from .scaffold import compile_extension_scaffold
 
@@ -17,6 +18,7 @@ __all__ = [
     "compile_extension_capabilities",
     "compile_extension_scaffold",
     "compile_extension_patch",
+    "run_extension_runtime_smoke",
     "apply_extension_patch",
     "compile_manifest",
     "compile_marketplace_bridge",
@@ -28,4 +30,4 @@ __all__ = [
     "validate_submission_evals",
     "verify_marketplace_install",
 ]
-__version__ = "0.8.0"
+__version__ = "0.9.0"
