@@ -1,0 +1,71 @@
+{
+  "schema_version": "0.1",
+  "capture": {
+    "product": "chatgpt",
+    "surface": "web",
+    "mode": "developer_mode",
+    "executed": false,
+    "attested_chatgpt_capture": false
+  },
+  "events": [
+    {
+      "direction": "host_to_app",
+      "method": "ui/initialize",
+      "call_id": 0,
+      "result": {
+        "hostContext": {
+          "openai/deepLink": {
+            "url": "/replace-with-observed-path"
+          }
+        }
+      }
+    },
+    {
+      "direction": "app_to_host",
+      "method": "ui/update-model-context",
+      "call_id": "model-context-1",
+      "params": {
+        "content": [
+          {
+            "type": "text",
+            "text": "replace-with-redacted-observed-shape"
+          }
+        ]
+      }
+    },
+    {
+      "direction": "host_to_app",
+      "method": "ui/update-model-context",
+      "call_id": "model-context-1",
+      "result": {
+        "_meta": {
+          "openai/modelContext": {
+            "updateId": "replace-with-observed-update-id"
+          }
+        }
+      }
+    },
+    {
+      "direction": "server_to_host",
+      "method": "openai/elicitation/create",
+      "call_id": "form-1",
+      "params": {
+        "mode": "form",
+        "message": "replace-with-observed-message",
+        "requestedSchema": {
+          "type": "object",
+          "properties": {}
+        }
+      }
+    },
+    {
+      "direction": "host_to_server",
+      "method": "openai/elicitation/create",
+      "call_id": "form-1",
+      "result": {
+        "action": "accept",
+        "content": {}
+      }
+    }
+  ]
+}
