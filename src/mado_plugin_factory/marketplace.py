@@ -609,3 +609,13 @@ def _safe_output_path(root: Path, output: str) -> Path:
 
 def _display_name(name: str) -> str:
     return " ".join(part.capitalize() for part in name.split("-") if part)
+
+
+def plugin_package_files(root: Path) -> list[str]:
+    """Return the curated distributable plugin file list."""
+    return _package_file_list(root.expanduser().resolve())
+
+
+def plugin_package_digest(root: Path) -> str:
+    """Return the SHA-256 digest for the curated distributable plugin package."""
+    return _package_digest(root.expanduser().resolve())
