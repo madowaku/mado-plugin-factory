@@ -1,6 +1,6 @@
-# MADO_PLUGIN_FACTORY_SPEC.md v1.0
+# MADO_PLUGIN_FACTORY_SPEC.md v1.1
 
-Status: Implemented through M1.0  
+Status: Implemented through M1.1  
 Project: MADO Plugin Factory  
 Repository: `madowaku/mado-plugin-factory`
 
@@ -40,6 +40,9 @@ Extension Runtime Smoke / Evidence <- M0.9 complete
   |
   v
 ChatGPT Host Replay / Acceptance   <- M1.0 complete
+  |
+  v
+Host Trace Capture / Normalizer    <- M1.1 complete
 ```
 
 The factory separates "generated", "inspected", and "executed" evidence and refuses to turn missing proof into a release claim.
@@ -714,7 +717,97 @@ It does not persist raw trace payloads, model-context text, form content, deep-l
 - `2`: expected host acceptance evidence is incomplete
 - `1`: trace/runtime evidence error
 
-## 12. Safety rules
+## 12. MPF-M1.1 Host Trace Capture / Normalizer
+
+Status: complete.
+
+### 12.1 Goal
+
+Convert user-supplied ChatGPT developer-mode, installed-plugin, or API Playground observations into the normalized M1.0 host trace contract without persisting raw logs or sensitive payload values.
+
+### 12.2 CLI
+
+```bash
+mpf host-capture <plugin-root> \\
+  --input ./raw-host-log.json \\
+  --surface web \\
+  --mode developer_mode \\
+  --executed \\
+  --attest-chatgpt-capture \\
+  --write
+```
+
+Optional controls:
+
+- `--format auto|json|jsonl|normalized`
+- `--output-dir <relative-directory>`
+- `--force`
+- `--pretty`
+
+### 12.3 Input adapters
+
+M1.1 supports:
+
+- an already normalized event array
+- generic JSON arrays and common record containers (`events`, `records`, `logs`, `messages`, `items`)
+- JSON-RPC request/response pair objects
+- JSONL/NDJSON streams with sequential JSON-RPC requests and responses
+
+The generic adapters are intentionally schema-light because ChatGPT/API Playground logging surfaces can evolve. Unknown records are counted and skipped rather than promoted into evidence.
+
+### 12.4 Event extraction
+
+Only host-replay-relevant methods are emitted:
+
+- `ui/initialize`
+- `ui/notifications/host-context-changed`
+- `ui/update-model-context`
+- `openai/elicitation/create`
+- `elicitation/create`
+
+Request/response directions are inferred only for these known contracts. Existing explicit directions are preserved.
+
+### 12.5 Correlation normalization
+
+Source call IDs are not persisted verbatim. M1.1 maps them deterministically in first-seen order to `call-1`, `call-2`, and so on, preserving request/response correlation while reducing accidental identifier leakage.
+
+### 12.6 Privacy reduction
+
+Before writing `trace.json`, M1.1:
+
+- replaces deep-link URL text with a `/__mpf_redacted__?sha256=<digest>` path
+- replaces Model-App Context text with `[redacted]`
+- replaces structured model context with a shape-only marker
+- hashes model-context update IDs
+- replaces form messages with `[redacted]`
+- replaces requested form schemas with an empty object schema
+- removes submitted form content
+
+The raw capture file is never copied into evidence.
+
+### 12.7 Provenance
+
+Capture product is fixed to ChatGPT. Surface and mode are explicit CLI inputs. `--attest-chatgpt-capture` is invalid unless `--executed` is also supplied.
+
+M1.1 does not infer execution or provenance from filenames, raw log shape, or existing capture metadata. Attestation remains a deliberate operator claim for the actual observed session.
+
+### 12.8 Output
+
+Default:
+
+```text
+evidence/host/captures/<capture-id>/
+  trace.json
+  capture.json
+```
+
+`trace.json` is directly consumable by M1.0. `capture.json` stores source SHA-256, adapter, record/event counts, redaction counts, provenance flags, artifact paths, and warnings.
+
+### 12.9 Evidence discipline
+
+M1.1 produces `inspected` capture evidence. Successful normalization does not imply host acceptance or end-to-end verification. Only M1.0 can combine the normalized trace with executed M0.9 runtime evidence and produce host acceptance.
+
+## 13. Safety rules
 
 M0.5 MUST NOT:
 
@@ -729,7 +822,7 @@ M0.5 MUST NOT:
 - write outside the plugin root
 - silently overwrite a differing release bundle
 
-## 13. Acceptance
+## 14. Acceptance
 
 MPF-M0.5 is complete when:
 
@@ -826,7 +919,24 @@ MPF-M1.0 is complete when:
 - CLI exit codes distinguish verified, unattested, incomplete, and invalid states
 - unit/CI tests cover full acceptance, missing events, correlation failure, decline flow, deep-link validation, privacy, runtime provenance, automatic evidence selection, and CLI behavior
 
-## 14. North star
+### MPF-M1.1 acceptance
+
+MPF-M1.1 is complete when:
+
+- one command normalizes supported raw/log formats into the M1.0 trace contract
+- auto format selection supports JSON, JSONL/NDJSON, and already-normalized input
+- request/response pairs preserve semantic direction and correlation
+- source call IDs are canonicalized before persistence
+- irrelevant records remain visible as skipped counts
+- no relevant host events results in a hard normalization error
+- deep-link, model-context, and form payloads are privacy-reduced before writing
+- capture attestation cannot be set without executed-session attestation
+- raw input is never copied into evidence
+- output paths remain inside the plugin root and symlinks/overwrite conflicts fail closed
+- written `trace.json` can feed M1.0 without manual restructuring
+- unit/CI tests cover normalized input, JSON pairs, JSONL pairing, notifications, privacy, provenance, empty/irrelevant input, write safety, and CLI behavior
+
+## 15. North star
 
 ```text
 "I have a useful Skill"
