@@ -18,6 +18,7 @@ from .credentials import CredentialMatrixError, run_credential_matrix
 from .freshness import FreshnessError, run_verification_freshness
 from .marketplace import plugin_package_digest
 from .negative import NegativeContractError, run_negative_contract
+from .security import SecuritySchemeGateError, run_security_scheme_gate
 
 SCHEMA_VERSION = "0.1"
 DEFAULT_VERIFICATIONS_ROOT = "evidence/verifications/extensions"
@@ -45,6 +46,7 @@ def run_verification_promotion(
     negative_baseline: str | None = None,
     credential_matrix: str | None = None,
     credential_baseline: str | None = None,
+    security_contract: str | None = None,
 ) -> dict[str, Any]:
     if bool(canary_contract) != bool(canary_baseline):
         raise PromotionError(
@@ -57,6 +59,10 @@ def run_verification_promotion(
     if bool(credential_matrix) != bool(credential_baseline):
         raise PromotionError(
             "credential matrix promotion requires both credential_matrix and credential_baseline"
+        )
+    if security_contract and not (credential_matrix and credential_baseline):
+        raise PromotionError(
+            "security scheme promotion requires credential_matrix and credential_baseline"
         )
 
     try:
@@ -149,6 +155,21 @@ def run_verification_promotion(
         except CredentialMatrixError as exc:
             raise PromotionError(str(exc)) from exc
 
+    security_report = None
+    if security_contract:
+        try:
+            security_report = run_security_scheme_gate(
+                root,
+                contract=security_contract,
+                matrix_report=credential_report,
+                server=server,
+                mode=runtime_mode,
+                timeout=timeout,
+                write_evidence=False,
+            )
+        except SecuritySchemeGateError as exc:
+            raise PromotionError(str(exc)) from exc
+
     return compile_verification_promotion(
         root,
         release_metadata=release_metadata,
@@ -167,6 +188,8 @@ def run_verification_promotion(
         credential_report=credential_report,
         enforce_credentials=bool(credential_report),
         credential_baseline_payload=credential_baseline_payload,
+        security_report=security_report,
+        enforce_security=bool(security_report),
     )
 
 
@@ -189,6 +212,8 @@ def compile_verification_promotion(
     credential_report: dict[str, Any] | None = None,
     enforce_credentials: bool = False,
     credential_baseline_payload: dict[str, Any] | None = None,
+    security_report: dict[str, Any] | None = None,
+    enforce_security: bool = False,
 ) -> dict[str, Any]:
     root = root.expanduser().resolve()
     if not root.exists() or not root.is_dir():
@@ -323,6 +348,23 @@ def compile_verification_promotion(
                 "baseline": deepcopy(credential_report.get("baseline") or {}),
             }
 
+    security_valid = True
+    security_summary: dict[str, Any] | None = None
+    if enforce_security:
+        security_valid = bool(
+            isinstance(security_report, dict)
+            and security_report.get("gate_passed") is True
+        )
+        if isinstance(security_report, dict):
+            security_summary = {
+                "gate_id": security_report.get("gate_id"),
+                "gate_passed": security_report.get("gate_passed") is True,
+                "blocking_reasons": security_report.get("blocking_reasons") or [],
+                "scope": security_report.get("scope"),
+                "contract": deepcopy(security_report.get("contract") or {}),
+                "matrix": deepcopy(security_report.get("matrix") or {}),
+            }
+
     gate_passed = bool(
         validation["valid"]
         and package_bound
@@ -332,6 +374,7 @@ def compile_verification_promotion(
         and behavior_valid
         and negative_valid
         and credential_valid
+        and security_valid
     )
 
     verification_blockers: list[str] = []
@@ -402,6 +445,15 @@ def compile_verification_promotion(
             verification_blockers.append(
                 "verification_credential_matrix_stale"
             )
+    if enforce_security:
+        if not isinstance(security_report, dict):
+            verification_blockers.append(
+                "verification_security_scheme_missing"
+            )
+        elif not security_report.get("gate_passed"):
+            verification_blockers.append(
+                "verification_security_scheme_contract_failed"
+            )
     verification_blockers = _unique(verification_blockers)
 
     try:
@@ -444,6 +496,11 @@ def compile_verification_promotion(
             if isinstance(credential_report, dict)
             else None
         ),
+        security_gate_id=(
+            security_report.get("gate_id")
+            if isinstance(security_report, dict)
+            else None
+        ),
     )
 
     promotion_ready = bool(
@@ -479,6 +536,8 @@ def compile_verification_promotion(
         "negative_contract": negative_summary,
         "credential_matrix_required": enforce_credentials,
         "credential_matrix": credential_summary,
+        "security_scheme_required": enforce_security,
+        "security_scheme": security_summary,
         "passed": gate_passed,
     }
 
@@ -530,6 +589,10 @@ def compile_verification_promotion(
         promoted_bundle["artifacts"][
             "credential_matrix_baseline"
         ] = "verification/credential-matrix-baseline.json"
+    if enforce_security:
+        promoted_bundle["artifacts"][
+            "security_scheme_gate"
+        ] = "verification/security-scheme-gate.json"
 
     return {
         "schema_version": SCHEMA_VERSION,
@@ -582,6 +645,9 @@ def compile_verification_promotion(
         "_credential_baseline": deepcopy(credential_baseline_payload)
         if isinstance(credential_baseline_payload, dict)
         else None,
+        "_security_report": deepcopy(security_report)
+        if isinstance(security_report, dict)
+        else None,
     }
 
 
@@ -628,6 +694,7 @@ def write_promoted_release(
     negative_baseline = report.get("_negative_baseline")
     credential_report = report.get("_credential_report")
     credential_baseline = report.get("_credential_baseline")
+    security_report = report.get("_security_report")
     if not isinstance(dossier, dict):
         raise PromotionError(
             "promotion report is missing verification dossier"
@@ -677,6 +744,10 @@ def write_promoted_release(
     if isinstance(credential_baseline, dict):
         extra["verification/credential-matrix-baseline.json"] = _json_bytes(
             credential_baseline
+        )
+    if isinstance(security_report, dict):
+        extra["verification/security-scheme-gate.json"] = _json_bytes(
+            security_report
         )
 
     written: list[str] = []
@@ -730,6 +801,7 @@ def public_promotion_report(
             "_negative_baseline",
             "_credential_report",
             "_credential_baseline",
+            "_security_report",
         }
     }
 
@@ -905,6 +977,7 @@ def _promotion_id(
     canary_id: str | None,
     negative_id: str | None,
     matrix_id: str | None,
+    security_gate_id: str | None,
 ) -> str:
     payload = {
         "bundle_id": bundle_id,
@@ -915,6 +988,7 @@ def _promotion_id(
         "canary_id": canary_id,
         "negative_id": negative_id,
         "matrix_id": matrix_id,
+        "security_gate_id": security_gate_id,
     }
     return hashlib.sha256(
         json.dumps(
