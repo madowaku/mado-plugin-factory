@@ -1,6 +1,6 @@
-# MADO_PLUGIN_FACTORY_SPEC.md v1.1
+# MADO_PLUGIN_FACTORY_SPEC.md v1.2
 
-Status: Implemented through M1.1  
+Status: Implemented through M1.2  
 Project: MADO Plugin Factory  
 Repository: `madowaku/mado-plugin-factory`
 
@@ -43,6 +43,9 @@ ChatGPT Host Replay / Acceptance   <- M1.0 complete
   |
   v
 Host Trace Capture / Normalizer    <- M1.1 complete
+  |
+  v
+Extension Verification Orchestrator <- M1.2 complete
 ```
 
 The factory separates "generated", "inspected", and "executed" evidence and refuses to turn missing proof into a release claim.
@@ -807,7 +810,135 @@ evidence/host/captures/<capture-id>/
 
 M1.1 produces `inspected` capture evidence. Successful normalization does not imply host acceptance or end-to-end verification. Only M1.0 can combine the normalized trace with executed M0.9 runtime evidence and produce host acceptance.
 
-## 13. Safety rules
+## 13. MPF-M1.2 Extension Verification Orchestrator
+
+Status: complete.
+
+### 13.1 Goal
+
+Bind M0.9 runtime smoke, M1.1 host capture normalization, and M1.0 host replay into one verification run that reports both verdicts and the exact next action without collapsing external-evidence waits into implementation failures.
+
+### 13.2 CLI
+
+```bash
+mpf verify-extensions <plugin-root> --write --pretty
+```
+
+Optional runtime controls:
+
+- `--server <name>`
+- `--runtime-mode auto|modern|legacy`
+- `--timeout <seconds>`
+
+Optional host-capture controls:
+
+- `--capture <file>`
+- `--capture-format auto|json|jsonl|normalized`
+- `--surface web|desktop|ios|android|api_playground`
+- `--capture-mode developer_mode|installed_plugin|api_playground`
+- `--executed`
+- `--attest-chatgpt-capture`
+
+Output controls:
+
+- `--output-dir <relative-directory>`
+- `--write`
+- `--force`
+- `--pretty`
+
+### 13.3 Orchestration flow
+
+M1.2 executes stages in this order:
+
+1. M0.9 MCP runtime smoke.
+2. If no host-required extensions remain and M0.9 is runtime-verified, finish at MCP-server scope.
+3. If host-required extensions remain and no capture is supplied, stop at `awaiting_host_capture`.
+4. When a capture is supplied, normalize it with M1.1.
+5. Replay the normalized trace against the exact in-memory M0.9 report using M1.0 acceptance rules.
+6. Emit a verification dossier with stage digests, verdicts, blockers, and next actions.
+
+### 13.4 Verification states
+
+M1.2 uses explicit outcome states:
+
+- `verified_mcp_server`: all required extension proof is complete at server scope and no host-only extension remains
+- `awaiting_host_capture`: runtime passed but host-required extensions need a ChatGPT observation
+- `verified_chatgpt_host`: runtime plus attested host replay are complete
+- `awaiting_capture_attestation`: host contracts replay successfully but the capture provenance is not fully attested
+- `host_incomplete`: required host events are missing from the normalized trace
+- `capture_failed`: supplied capture could not be normalized
+- `host_replay_error`: normalized capture and runtime evidence could not be evaluated together
+- `runtime_failed`: runtime executed but expected protocol evidence is missing
+- `runtime_error`: MCP process/configuration execution failed
+- `no_verification_target`: runtime succeeded but there is no directly verifiable or host-required extension target
+
+### 13.5 Evidence binding
+
+The dossier stores SHA-256 digests for each available stage snapshot. Host replay is evaluated against the same in-memory runtime report produced by the run, not an independently selected stale evidence file.
+
+The verification ID is derived from the runtime, capture, normalized trace, host replay, outcome state, and stage-error digests. A rerun that materially changes executed evidence produces a different verification ID.
+
+### 13.6 External evidence is not a runtime failure
+
+When M0.9 passes but reports host-required extensions, absence of a ChatGPT capture is represented as `awaiting_host_capture`, not `runtime_failed`.
+
+Likewise, a structurally complete host replay from an unattested capture is `awaiting_capture_attestation`, not a protocol failure.
+
+This separation allows automation and humans to distinguish code defects from evidence still needing to be collected in ChatGPT.
+
+### 13.7 Dossier output
+
+Default:
+
+```text
+evidence/verifications/extensions/<verification-id>/
+  dossier.json
+  runtime.json
+  capture.json
+  trace.json
+  host.json
+```
+
+Only artifacts for stages that actually ran are written. Runtime-only verification therefore writes `runtime.json` plus `dossier.json`; a host-complete run includes all five files.
+
+The raw host capture is never copied into the dossier. `trace.json` is the privacy-reduced M1.1 trace.
+
+### 13.8 Dossier contract
+
+`dossier.json` records:
+
+- verification ID/state/scope
+- verification verdict and follow-up requirement
+- per-stage state and SHA-256
+- runtime-verified and runtime-missing extensions
+- host-required, host-accepted, and host-missing extensions
+- stage errors
+- next actions
+- artifact paths
+- warnings inherited from completed stages
+
+### 13.9 Exit codes
+
+- `0`: verification complete and verified
+- `3`: external ChatGPT capture or capture attestation is still required
+- `2`: runtime/host verification failed or is incomplete
+- `1`: orchestrator input or write error
+
+### 13.10 Write safety
+
+The dossier writer:
+
+- writes only inside the plugin root
+- rejects absolute paths and parent traversal
+- rejects symlinked targets
+- is idempotent for identical bytes
+- requires `--force` before replacing differing dossier artifacts
+
+### 13.11 Evidence discipline
+
+M1.2 does not strengthen any stage beyond its source evidence. M0.9 remains the MCP runtime proof, M1.1 remains inspected capture normalization, and M1.0 remains the host acceptance gate. M1.2 only binds these stages into one run and one operator-facing verdict.
+
+## 14. Safety rules
 
 M0.5 MUST NOT:
 
@@ -822,7 +953,7 @@ M0.5 MUST NOT:
 - write outside the plugin root
 - silently overwrite a differing release bundle
 
-## 14. Acceptance
+## 15. Acceptance
 
 MPF-M0.5 is complete when:
 
@@ -936,7 +1067,23 @@ MPF-M1.1 is complete when:
 - written `trace.json` can feed M1.0 without manual restructuring
 - unit/CI tests cover normalized input, JSON pairs, JSONL pairing, notifications, privacy, provenance, empty/irrelevant input, write safety, and CLI behavior
 
-## 15. North star
+### MPF-M1.2 acceptance
+
+MPF-M1.2 is complete when:
+
+- one command executes M0.9 runtime verification and conditionally continues through M1.1 and M1.0
+- runtime-only extension sets can complete without unnecessary host capture
+- host-required extension sets stop at an explicit external-evidence wait when capture is absent
+- supplied captures are normalized before host replay and raw input is never written to the dossier
+- host replay is bound to the exact runtime result produced by the same run
+- runtime failures, host evidence gaps, and unattested captures receive distinct states
+- stage digests and artifact paths are recorded in one dossier
+- next actions are explicit for every non-verified terminal state
+- dossier writes are contained, idempotent, symlink-safe, and overwrite-guarded
+- CLI exit codes distinguish verified, external-evidence wait, verification failure, and orchestrator error
+- unit/CI tests cover runtime-only success, host wait, full host verification, unattested capture, missing host event, runtime metadata failure, privacy, write safety, and CLI behavior
+
+## 16. North star
 
 ```text
 "I have a useful Skill"
