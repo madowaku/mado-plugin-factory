@@ -40,6 +40,10 @@ class RuntimeSmokeError(ValueError):
     pass
 
 
+class UnsafeCanaryToolError(RuntimeSmokeError):
+    pass
+
+
 def run_extension_runtime_smoke(
     root: Path,
     *,
@@ -413,6 +417,14 @@ def _execute_tool_with_client(
     if descriptor is None:
         raise RuntimeSmokeError(
             f"MCP tool not found: {tool_name}"
+        )
+    annotations = descriptor.get("annotations")
+    if not (
+        isinstance(annotations, dict)
+        and annotations.get("readOnlyHint") is True
+    ):
+        raise UnsafeCanaryToolError(
+            f"canary refuses tool without annotations.readOnlyHint=true: {tool_name}"
         )
 
     message = client.request(
