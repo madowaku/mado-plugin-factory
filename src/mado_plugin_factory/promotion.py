@@ -65,6 +65,7 @@ def run_verification_promotion(
                 root,
                 contract=canary_contract,
                 baseline_evidence=canary_baseline,
+                verification_evidence=verification_evidence,
                 server=server,
                 mode=runtime_mode,
                 timeout=timeout,
