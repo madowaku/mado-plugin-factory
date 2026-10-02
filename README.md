@@ -23,6 +23,7 @@ Skill / Repo
   -> MPF-M1.5 Behavioral Contract Replay / Remote MCP Canary
   -> MPF-M1.6 Authorization / Negative Contract Replay
   -> MPF-M1.7 Credential Matrix / Scope Boundary Replay
+  -> MPF-M1.8 Least-Privilege / Security Scheme Contract Gate
 ```
 
 ## Status
@@ -45,8 +46,9 @@ Skill / Repo
 - **MPF-M1.5 Behavioral Contract Replay / Remote MCP Canary** ✅
 - **MPF-M1.6 Authorization / Negative Contract Replay** ✅
 - **MPF-M1.7 Credential Matrix / Scope Boundary Replay** ✅
+- **MPF-M1.8 Least-Privilege / Security Scheme Contract Gate** ✅
 
-Current package version: `1.7.0`.
+Current package version: `1.8.0`.
 
 ## M0.1 Candidate Scanner
 
@@ -786,6 +788,71 @@ When enabled, a scope/role boundary change adds `verification_credential_matrix_
 
 M1.7 deliberately remains read-only and profile-driven. It does not execute destructive actions or claim exhaustive coverage of every organization policy, role, OAuth scope, or account state.
 
+## M1.8 Least-Privilege / Security Scheme Contract Gate
+
+M1.8 compares the **live per-tool `securitySchemes` declaration** with permission evidence from a verified M1.7 credential-matrix replay.
+
+Start from:
+
+```text
+templates/security/contract.json
+```
+
+Standalone gate:
+
+```bash
+mpf security-gate /path/to/plugin \
+  --contract ./security-contract.json \
+  --matrix-evidence evidence/credentials/extensions/<matrix-id>.json \
+  --write-evidence \
+  --pretty
+```
+
+The contract defines public permission metadata only:
+
+- credential-profile IDs
+- whether each profile is anonymous or OAuth-authenticated
+- asserted OAuth scope labels
+- per-tool expected access mode: `oauth_required`, `optional_auth`, or `noauth`
+- M1.7 case IDs that prove a scope set is sufficient
+- M1.7 case IDs that are intentionally insufficient because of missing scope
+
+M1.8 reads the live MCP descriptor and normalizes per-tool security alternatives:
+
+```text
+noauth
+oauth2(scopes=[...])
+```
+
+For each OAuth alternative, the gate checks that at least one successful OAuth profile provides all declared scopes. If a successful profile lacks a declared scope, the descriptor is over-declaring permission relative to observed runtime behavior.
+
+For each `insufficient_scope_case`, the gate also checks that its asserted profile scopes do **not** already satisfy an advertised OAuth alternative. If they do, the runtime appears to require an extra permission that is absent from the descriptor.
+
+The access-mode contract catches mismatches such as:
+
+- `oauth_required` tool advertising `noauth`
+- `optional_auth` tool missing either `noauth` or `oauth2`
+- `noauth` tool unexpectedly advertising OAuth-only access
+- unsupported security-scheme types
+
+Scope labels are permission metadata and may appear in M1.8 evidence. Access tokens and credential environment-variable names never do.
+
+Promotion can opt into M1.8 only together with M1.7:
+
+```bash
+mpf promote /path/to/plugin \
+  --release-metadata ./release.json \
+  --verification-evidence evidence/verifications/extensions/<verification-id>/dossier.json \
+  --credential-matrix ./credential-matrix.json \
+  --credential-baseline evidence/credentials/extensions/<baseline-id>.json \
+  --security-contract ./security-contract.json \
+  --write
+```
+
+A failed least-privilege check adds `verification_security_scheme_contract_failed`. Promoted release evidence includes `verification/security-scheme-gate.json`, outside `plugin.zip`.
+
+M1.8 is evidence-backed rather than omniscient: role/workspace/row-level policy constraints should not be mislabeled as missing OAuth scopes. Only cases intentionally classified as insufficient-scope evidence belong in `insufficient_scope_cases`.
+
 ## Evidence states
 
 The factory uses only:
@@ -802,7 +869,7 @@ A stronger evidence state is never claimed without corresponding proof or explic
 PYTHONPATH=src python -m unittest discover -s tests -v
 ```
 
-Coverage includes the full M0.1-M1.7 pipeline, including deterministic ZIP generation, bundle overwrite safety, MCP-specific submission blockers, local install evidence, path containment, and secret-bearing metadata rejection.
+Coverage includes the full M0.1-M1.8 pipeline, including deterministic ZIP generation, bundle overwrite safety, MCP-specific submission blockers, local install evidence, path containment, and secret-bearing metadata rejection.
 
 ## Source of truth
 
