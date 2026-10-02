@@ -20,6 +20,7 @@ from .marketplace import (
 from .patch import apply_extension_patch, compile_extension_patch
 from .runtime import run_extension_runtime_smoke
 from .scanner import scan_candidate
+from .security import run_security_scheme_gate
 from .scaffold import compile_extension_scaffold
 
 __all__ = [
@@ -27,6 +28,7 @@ __all__ = [
     "normalize_host_capture",
     "run_behavior_canary",
     "run_credential_matrix",
+    "run_security_scheme_gate",
     "run_negative_contract",
     "compile_extension_scaffold",
     "compile_extension_patch",
@@ -47,4 +49,4 @@ __all__ = [
     "validate_submission_evals",
     "verify_marketplace_install",
 ]
-__version__ = "1.7.0"
+__version__ = "1.8.0"

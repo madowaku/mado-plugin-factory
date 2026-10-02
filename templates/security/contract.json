@@ -1,0 +1,39 @@
+{
+  "schema_version": "0.1",
+  "server": "replace-with-server-name",
+  "profiles": {
+    "anonymous": {
+      "auth": "anonymous",
+      "scopes": []
+    },
+    "viewer": {
+      "auth": "oauth",
+      "scopes": ["docs.read"]
+    },
+    "editor": {
+      "auth": "oauth",
+      "scopes": ["docs.read", "docs.write"]
+    },
+    "admin": {
+      "auth": "oauth",
+      "scopes": ["docs.read", "docs.write", "admin.read"]
+    },
+    "missing-scope": {
+      "auth": "oauth",
+      "scopes": []
+    }
+  },
+  "tools": [
+    {
+      "tool": "replace-with-read-tool",
+      "access": "oauth_required",
+      "sufficient_cases": [
+        "viewer-read",
+        "editor-read"
+      ],
+      "insufficient_scope_cases": [
+        "missing-scope-denied"
+      ]
+    }
+  ]
+}

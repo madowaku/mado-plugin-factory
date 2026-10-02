@@ -1146,6 +1146,167 @@ class VerificationPromotionGateTests(unittest.TestCase):
                 names,
             )
 
+    def test_security_scheme_failure_blocks_promotion(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "plugin"
+            _make_plugin(root, host_required=False)
+            _make_release_evidence(root)
+            dossier = _verification(
+                root,
+                host_required=False,
+            )
+            (root / "matrix.json").write_text(
+                "{}",
+                encoding="utf-8",
+            )
+            (root / "security.json").write_text(
+                "{}",
+                encoding="utf-8",
+            )
+            baseline = root / "matrix-baseline.json"
+            baseline.write_text(
+                json.dumps(
+                    {
+                        "evidence_state": "executed",
+                        "matrix_id": "baseline-matrix",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            matrix_replay = {
+                "evidence_state": "executed",
+                "mode": "replay",
+                "matrix_id": "replay-matrix",
+                "matrix_passed": True,
+                "matrix_verified": True,
+                "blocking_reasons": [],
+                "scope": "read_only_credential_scope_boundary",
+                "contract": {"sha256": "matrix-contract"},
+                "baseline": {"matrix_id": "baseline-matrix"},
+                "cases": [],
+            }
+            security = {
+                "evidence_state": "executed",
+                "gate_id": "security-gate",
+                "gate_passed": False,
+                "blocking_reasons": [
+                    "scope.read:declared_scope_not_supported_by_success"
+                ],
+                "scope": "least_privilege_security_scheme_contract",
+                "contract": {"sha256": "security-contract"},
+                "matrix": {"matrix_id": "replay-matrix"},
+            }
+
+            with patch(
+                "mado_plugin_factory.promotion.run_credential_matrix",
+                return_value=matrix_replay,
+            ), patch(
+                "mado_plugin_factory.promotion.run_security_scheme_gate",
+                return_value=security,
+            ):
+                report = run_verification_promotion(
+                    root,
+                    release_metadata=_release_metadata(),
+                    verification_evidence=dossier,
+                    credential_matrix="matrix.json",
+                    credential_baseline="matrix-baseline.json",
+                    security_contract="security.json",
+                )
+
+            self.assertFalse(report["promotion_ready"])
+            self.assertIn(
+                "verification_security_scheme_contract_failed",
+                report["blocking_reasons"],
+            )
+
+    def test_verified_security_gate_is_copied_outside_zip(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "plugin"
+            _make_plugin(root, host_required=False)
+            _make_release_evidence(root)
+            dossier = _verification(
+                root,
+                host_required=False,
+            )
+            (root / "matrix.json").write_text(
+                "{}",
+                encoding="utf-8",
+            )
+            (root / "security.json").write_text(
+                "{}",
+                encoding="utf-8",
+            )
+            baseline = root / "matrix-baseline.json"
+            baseline.write_text(
+                json.dumps(
+                    {
+                        "evidence_state": "executed",
+                        "matrix_id": "baseline-matrix",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            matrix_replay = {
+                "evidence_state": "executed",
+                "mode": "replay",
+                "matrix_id": "replay-matrix",
+                "matrix_passed": True,
+                "matrix_verified": True,
+                "blocking_reasons": [],
+                "scope": "read_only_credential_scope_boundary",
+                "contract": {"sha256": "matrix-contract"},
+                "baseline": {"matrix_id": "baseline-matrix"},
+                "cases": [],
+            }
+            security = {
+                "evidence_state": "executed",
+                "gate_id": "security-gate",
+                "gate_passed": True,
+                "blocking_reasons": [],
+                "scope": "least_privilege_security_scheme_contract",
+                "contract": {"sha256": "security-contract"},
+                "matrix": {"matrix_id": "replay-matrix"},
+            }
+
+            with patch(
+                "mado_plugin_factory.promotion.run_credential_matrix",
+                return_value=matrix_replay,
+            ), patch(
+                "mado_plugin_factory.promotion.run_security_scheme_gate",
+                return_value=security,
+            ):
+                report = run_verification_promotion(
+                    root,
+                    release_metadata=_release_metadata(),
+                    verification_evidence=dossier,
+                    credential_matrix="matrix.json",
+                    credential_baseline="matrix-baseline.json",
+                    security_contract="security.json",
+                )
+
+            self.assertTrue(report["promotion_ready"])
+            result = write_promoted_release(
+                root,
+                report,
+            )
+            release = Path(result["bundle_root"])
+            self.assertTrue(
+                (
+                    release
+                    / "verification"
+                    / "security-scheme-gate.json"
+                ).is_file()
+            )
+            with zipfile.ZipFile(
+                release / "plugin.zip",
+                "r",
+            ) as archive:
+                names = set(archive.namelist())
+            self.assertNotIn(
+                "verification/security-scheme-gate.json",
+                names,
+            )
+
     def test_cli_promotes_verified_release(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "plugin"
