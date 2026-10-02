@@ -20,7 +20,7 @@ Skill / Repo
 - **MPF-M0.2 Manifest Compiler** ✅
 - **MPF-M0.3 Submission Eval Compiler** ✅
 - **MPF-M0.4 Local Marketplace Bridge** ✅
-- MPF-M0.5 Submission Evidence Bundle\n\nCurrent package version: `0.4.0`.
+- **MPF-M0.5 Submission Evidence Bundle** ✅\n\nCurrent package version: `0.5.0`.
 
 ## M0.1 Candidate Scanner
 
