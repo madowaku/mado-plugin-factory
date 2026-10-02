@@ -6,7 +6,11 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-from .runtime import RuntimeSmokeError, execute_mcp_tool_canary
+from .runtime import (
+    RuntimeSmokeError,
+    UnsafeCanaryToolError,
+    execute_mcp_tool_canary,
+)
 
 SCHEMA_VERSION = "0.1"
 DEFAULT_EVIDENCE_DIR = "evidence/canary/extensions"
@@ -113,6 +117,26 @@ def run_behavior_canary(
                 mode=mode,
                 timeout=timeout,
             )
+        except UnsafeCanaryToolError:
+            observations.append(
+                {
+                    "id": case_id,
+                    "tool": tool,
+                    "arguments_sha256": _json_sha256(
+                        arguments
+                    ),
+                    "safe_to_execute": False,
+                    "expectation_passed": False,
+                    "behavior_sha256": None,
+                    "blocking_reasons": [
+                        "tool_not_explicitly_read_only"
+                    ],
+                }
+            )
+            blockers.append(
+                f"{case_id}:tool_not_explicitly_read_only"
+            )
+            continue
         except RuntimeSmokeError as exc:
             observations.append(
                 {
@@ -134,37 +158,6 @@ def run_behavior_canary(
             )
             blockers.append(
                 f"{case_id}:canary_execution_error"
-            )
-            continue
-
-        descriptor = execution.get("descriptor")
-        annotations = (
-            descriptor.get("annotations")
-            if isinstance(descriptor, dict)
-            else None
-        )
-        read_only = bool(
-            isinstance(annotations, dict)
-            and annotations.get("readOnlyHint") is True
-        )
-        if not read_only:
-            observations.append(
-                {
-                    "id": case_id,
-                    "tool": tool,
-                    "arguments_sha256": _json_sha256(
-                        arguments
-                    ),
-                    "safe_to_execute": False,
-                    "expectation_passed": False,
-                    "behavior_sha256": None,
-                    "blocking_reasons": [
-                        "tool_not_explicitly_read_only"
-                    ],
-                }
-            )
-            blockers.append(
-                f"{case_id}:tool_not_explicitly_read_only"
             )
             continue
 
