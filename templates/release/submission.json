@@ -1,0 +1,34 @@
+{
+  "availability": [
+    "JP"
+  ],
+  "release_notes": "Initial submission. Replace with what the plugin does and anything reviewers should know.",
+  "starter_prompts": [],
+  "listing": {
+    "website_url": "https://example.com",
+    "support_url": "https://example.com/support",
+    "privacy_policy_url": "https://example.com/privacy",
+    "terms_url": "https://example.com/terms",
+    "logo_ready": false
+  },
+  "review": {
+    "eval_cases_reviewed": false,
+    "skills_final_tree_tested": false,
+    "listing_reviewed": false
+  },
+  "portal": {
+    "apps_management_write_access": false,
+    "developer_identity_verified": false,
+    "policy_attestations_complete": false,
+    "skill_safety_scan_passed": false
+  },
+  "mcp": {
+    "production_url": "",
+    "demo_recording_url": "",
+    "domain_verified": false,
+    "tool_scan_current": false,
+    "tool_annotations_reviewed": false,
+    "reviewer_credentials_ready": false
+  },
+  "policy_attestation_note": ""
+}
