@@ -13,6 +13,7 @@ from .bundle import (
     compile_submission_bundle,
     write_submission_bundle,
 )
+from .freshness import FreshnessError, run_verification_freshness
 from .marketplace import plugin_package_digest
 
 SCHEMA_VERSION = "0.1"
@@ -24,6 +25,42 @@ class PromotionError(ValueError):
     pass
 
 
+def run_verification_promotion(
+    root: Path,
+    *,
+    release_metadata: dict[str, Any] | None = None,
+    verification_evidence: str,
+    requirement: str = "auto",
+    eval_evidence: str = DEFAULT_EVAL_EVIDENCE,
+    install_evidence: str = DEFAULT_INSTALL_EVIDENCE,
+    server: str | None = None,
+    runtime_mode: str = "auto",
+    timeout: float = 5.0,
+) -> dict[str, Any]:
+    try:
+        freshness = run_verification_freshness(
+            root,
+            verification_evidence=verification_evidence,
+            server=server,
+            mode=runtime_mode,
+            timeout=timeout,
+            write_evidence=False,
+        )
+    except FreshnessError as exc:
+        raise PromotionError(str(exc)) from exc
+
+    return compile_verification_promotion(
+        root,
+        release_metadata=release_metadata,
+        verification_evidence=verification_evidence,
+        requirement=requirement,
+        eval_evidence=eval_evidence,
+        install_evidence=install_evidence,
+        freshness_report=freshness,
+        enforce_freshness=True,
+    )
+
+
 def compile_verification_promotion(
     root: Path,
     *,
@@ -32,6 +69,8 @@ def compile_verification_promotion(
     requirement: str = "auto",
     eval_evidence: str = DEFAULT_EVAL_EVIDENCE,
     install_evidence: str = DEFAULT_INSTALL_EVIDENCE,
+    freshness_report: dict[str, Any] | None = None,
+    enforce_freshness: bool = False,
 ) -> dict[str, Any]:
     root = root.expanduser().resolve()
     if not root.exists() or not root.is_dir():
@@ -81,11 +120,40 @@ def compile_verification_promotion(
         state,
         resolved_requirement,
     )
+
+    dossier_sha256 = hashlib.sha256(
+        verification_path.read_bytes()
+    ).hexdigest()
+    freshness_valid = True
+    freshness_summary: dict[str, Any] | None = None
+    if enforce_freshness:
+        freshness_valid = False
+        if isinstance(freshness_report, dict):
+            fresh_verification = freshness_report.get("verification")
+            fresh_dossier_sha = (
+                fresh_verification.get("dossier_sha256")
+                if isinstance(fresh_verification, dict)
+                else None
+            )
+            freshness_valid = bool(
+                freshness_report.get("freshness_verified")
+                and fresh_dossier_sha == dossier_sha256
+            )
+            freshness_summary = {
+                "freshness_id": freshness_report.get("freshness_id"),
+                "freshness_verified": freshness_report.get("freshness_verified") is True,
+                "dossier_sha256_matches": fresh_dossier_sha == dossier_sha256,
+                "blocking_reasons": freshness_report.get("blocking_reasons") or [],
+                "drift": deepcopy(freshness_report.get("drift") or {}),
+                "scope": freshness_report.get("scope"),
+            }
+
     gate_passed = bool(
         validation["valid"]
         and package_bound
         and verification_verified
         and state_satisfies
+        and freshness_valid
     )
 
     verification_blockers: list[str] = []
@@ -109,6 +177,26 @@ def compile_verification_promotion(
         verification_blockers.append(
             f"verification_requirement_{resolved_requirement}_not_satisfied"
         )
+    if enforce_freshness:
+        if not isinstance(freshness_report, dict):
+            verification_blockers.append(
+                "verification_freshness_missing"
+            )
+        elif not freshness_report.get("freshness_verified"):
+            verification_blockers.append(
+                "verification_freshness_stale"
+            )
+        else:
+            fresh_verification = freshness_report.get("verification")
+            fresh_dossier_sha = (
+                fresh_verification.get("dossier_sha256")
+                if isinstance(fresh_verification, dict)
+                else None
+            )
+            if fresh_dossier_sha != dossier_sha256:
+                verification_blockers.append(
+                    "verification_freshness_dossier_mismatch"
+                )
     verification_blockers = _unique(verification_blockers)
 
     try:
@@ -126,14 +214,16 @@ def compile_verification_promotion(
             "extension verification promotion requires a plugin with MCP"
         )
 
-    dossier_sha256 = hashlib.sha256(
-        verification_path.read_bytes()
-    ).hexdigest()
     promotion_id = _promotion_id(
         bundle_id=bundle["bundle_id"],
         package_digest=current_package_digest,
         dossier_sha256=dossier_sha256,
         requirement=resolved_requirement,
+        freshness_id=(
+            freshness_report.get("freshness_id")
+            if isinstance(freshness_report, dict)
+            else None
+        ),
     )
 
     promotion_ready = bool(
@@ -161,6 +251,8 @@ def compile_verification_promotion(
         "package_digest_current": current_package_digest,
         "package_digest_matches": package_bound,
         "artifact_integrity": validation,
+        "freshness_required": enforce_freshness,
+        "freshness": freshness_summary,
         "passed": gate_passed,
     }
 
@@ -187,6 +279,10 @@ def compile_verification_promotion(
     promoted_bundle["artifacts"][
         "verification_directory"
     ] = "verification"
+    if enforce_freshness:
+        promoted_bundle["artifacts"][
+            "freshness_report"
+        ] = "verification/freshness.json"
 
     return {
         "schema_version": SCHEMA_VERSION,
@@ -218,6 +314,9 @@ def compile_verification_promotion(
         "_verification_artifacts": validation[
             "artifact_payloads"
         ],
+        "_freshness_report": deepcopy(freshness_report)
+        if isinstance(freshness_report, dict)
+        else None,
     }
 
 
@@ -257,6 +356,7 @@ def write_promoted_release(
     stage_payloads = report.get(
         "_verification_artifacts"
     )
+    freshness_report = report.get("_freshness_report")
     if not isinstance(dossier, dict):
         raise PromotionError(
             "promotion report is missing verification dossier"
@@ -278,6 +378,10 @@ def write_promoted_release(
     ):
         extra[f"verification/{name}"] = _json_bytes(
             payload
+        )
+    if isinstance(freshness_report, dict):
+        extra["verification/freshness.json"] = _json_bytes(
+            freshness_report
         )
 
     written: list[str] = []
@@ -324,6 +428,7 @@ def public_promotion_report(
         not in {
             "_verification_dossier",
             "_verification_artifacts",
+            "_freshness_report",
         }
     }
 
@@ -495,12 +600,14 @@ def _promotion_id(
     package_digest: str,
     dossier_sha256: str,
     requirement: str,
+    freshness_id: str | None,
 ) -> str:
     payload = {
         "bundle_id": bundle_id,
         "package_digest": package_digest,
         "dossier_sha256": dossier_sha256,
         "requirement": requirement,
+        "freshness_id": freshness_id,
     }
     return hashlib.sha256(
         json.dumps(
