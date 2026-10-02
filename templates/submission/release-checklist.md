@@ -1,84 +1,96 @@
 # Plugin Release Checklist
 
-## Structure
+## Package
 
-- [ ] Root `plugin.json` exists.
-- [ ] Portable schema and plugin identity validate.
-- [ ] Skills and optional MCP/app/hook/assets surfaces are intentional.
-- [ ] Compatibility output, if present, is not treated as canonical.
+- [ ] Root `plugin.json` validates.
+- [ ] Plugin identity/version are final.
+- [ ] Curated package inventory is intentional.
+- [ ] Final Skill tree is the tree that was locally tested.
+- [ ] Generated `evidence/` does not affect source scanning.
 
 ## Candidate scan
 
 - [ ] `mpf scan` completed.
 - [ ] Architecture is expected.
 - [ ] Dependencies and risk flags were reviewed.
-- [ ] Source candidate remained unmodified.
+- [ ] Scanner missing requirements are resolved or documented.
 
-## Manifest compile
+## Manifest
 
-- [ ] `mpf manifest` reports `validation.valid: true`.
-- [ ] OpenAI install-surface metadata was reviewed.
-- [ ] Legal/publisher metadata was supplied rather than invented.
-- [ ] Existing manifest replacement used explicit `--force` when needed.
+- [ ] `mpf manifest` reports valid.
+- [ ] Display name, descriptions, and category are final.
+- [ ] Starter prompts are realistic.
+- [ ] Logo/brand assets are ready.
+- [ ] Publisher/legal URLs were supplied rather than invented.
 
-## Submission eval compile
+## Submission evals
 
 - [ ] Exactly five positive cases exist.
 - [ ] Exactly three negative cases exist.
 - [ ] Prompts/scenarios and intent keys are unique.
 - [ ] Fixtures/test-account requirements are reproducible.
-- [ ] Generated cases remain `generated` and `review_required: true`.
-- [ ] Scanner risks are represented in negative-case review.
+- [ ] Risk-derived negative cases were reviewed.
+- [ ] Human reviewer explicitly reviewed the final 5/3 set.
+- [ ] Generated case origin was not mislabeled as executed evidence.
 
-## Local marketplace bridge
+## Local install
 
-- [ ] `mpf marketplace bridge` reports a valid catalog.
-- [ ] Marketplace id and display name are intentional.
-- [ ] Entry source is `./plugins/<plugin-name>`.
-- [ ] Source path stays inside marketplace root.
-- [ ] `policy.installation`, `policy.authentication`, and `category` are present.
-- [ ] Staged package contains only distributable plugin surfaces.
-- [ ] No symlinked plugin content was staged.
-- [ ] Existing unrelated marketplace entries were preserved.
-- [ ] Differing staged/catalog content was not overwritten without explicit `--force`.
-
-## Local install verification
-
-- [ ] ChatGPT desktop was restarted after marketplace changes.
-- [ ] Plugin was installed from the intended local marketplace.
-- [ ] `mpf marketplace verify` was run after installation.
-- [ ] Marketplace catalog was valid at verification time.
-- [ ] Matching plugin entry existed.
-- [ ] Installed cache directory existed.
-- [ ] Installed portable manifest was valid.
-- [ ] Installed plugin identity matched.
+- [ ] Local marketplace bridge was written.
+- [ ] Plugin was installed from the intended marketplace.
+- [ ] `mpf marketplace verify` was run.
+- [ ] Installed manifest identity matched.
 - [ ] Staged and installed package digests matched.
 - [ ] `install_verified: true`.
-- [ ] Install verification evidence was saved when needed.
-- [ ] A stale/different cache copy was not accepted as success.
+- [ ] Verification evidence was saved.
 
-## Human review
+## Release metadata
 
-- [ ] Positive cases are realistic and reproducible.
-- [ ] Negative cases exercise genuine boundaries.
-- [ ] Reviewer fixtures/accounts need no MFA, SMS, email confirmation, or private-network access when applicable.
-- [ ] Evidence-state promotion is supported by actual inspection/execution.
+- [ ] Availability countries/regions are final.
+- [ ] Release notes explain purpose, initial/update status, changes, and reviewer setup.
+- [ ] Listing review is attested.
+- [ ] Final Skill-tree testing is attested.
+- [ ] Eval review is attested.
+- [ ] No passwords, tokens, API keys, or reviewer credentials are stored in release metadata.
 
-## Publication metadata
+## Publication URLs
 
-- [ ] Display name and descriptions are final.
-- [ ] Starter prompts are realistic.
-- [ ] Website/support/privacy/terms requirements are satisfied.
-- [ ] Availability and release notes are ready.
+- [ ] Website is public HTTPS.
+- [ ] Support URL is public HTTPS.
+- [ ] Privacy policy is public HTTPS.
+- [ ] Terms URL is public HTTPS.
+- [ ] URLs match the publisher identity.
 
-## MCP checks, when applicable
+## Portal prerequisites
 
-- [ ] Tool annotations are accurate.
-- [ ] Auth/data-flow behavior is documented.
-- [ ] No tool response leaks secrets or unnecessary personal data.
-- [ ] Endpoint/domain requirements are satisfied.
+- [ ] Submitter has Apps Management write access.
+- [ ] Publisher identity is verified.
+- [ ] Policy attestations are complete.
+- [ ] Bundled Skill safety/security scan passed.
 
-## Evidence state
+## MCP-only / MCP-plus-Skills
+
+- [ ] Production MCP URL is HTTPS and publicly reachable.
+- [ ] Demo recording URL is ready.
+- [ ] Domain verification is complete.
+- [ ] Current tool scan passed.
+- [ ] Tool names/descriptions/schemas match behavior.
+- [ ] `readOnlyHint`, `openWorldHint`, and `destructiveHint` were reviewed.
+- [ ] Reviewer access works without MFA/SMS/email confirmation/private network where applicable.
+- [ ] Tool responses do not expose unnecessary personal data, auth secrets, debug payloads, or internal identifiers.
+
+## M0.5 bundle
+
+- [ ] `mpf bundle` was run with final release metadata.
+- [ ] `upload_ready: true`.
+- [ ] Submission blockers were reviewed.
+- [ ] `submission_ready: true` only after external/portal gates are actually satisfied.
+- [ ] Versioned bundle directory was written.
+- [ ] `plugin.zip` excludes internal evidence/docs/tests.
+- [ ] `plugin.zip.sha256` matches the ZIP.
+- [ ] Re-running bundle generation is idempotent.
+- [ ] Differing release artifacts were not overwritten without explicit `--force`.
+
+## Evidence states
 
 Allowed states:
 
@@ -86,4 +98,4 @@ Allowed states:
 - `inspected`
 - `executed`
 
-A stronger state MUST NOT be claimed without corresponding proof.
+A stronger state MUST NOT be claimed without proof or explicit human review attestation.
