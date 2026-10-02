@@ -21,6 +21,7 @@ Skill / Repo
   -> MPF-M1.3 Verification Promotion Gate / Release Bundle Bridge
   -> MPF-M1.4 Verification Freshness / Remote MCP Drift Gate
   -> MPF-M1.5 Behavioral Contract Replay / Remote MCP Canary
+  -> MPF-M1.6 Authorization / Negative Contract Replay
 ```
 
 ## Status
@@ -41,8 +42,9 @@ Skill / Repo
 - **MPF-M1.3 Verification Promotion Gate / Release Bundle Bridge** ✅
 - **MPF-M1.4 Verification Freshness / Remote MCP Drift Gate** ✅
 - **MPF-M1.5 Behavioral Contract Replay / Remote MCP Canary** ✅
+- **MPF-M1.6 Authorization / Negative Contract Replay** ✅
 
-Current package version: `1.5.0`.
+Current package version: `1.6.0`.
 
 ## M0.1 Candidate Scanner
 
@@ -652,6 +654,77 @@ Promotion then requires both M1.4 runtime freshness and M1.5 behavioral replay. 
 
 The M1.5 scope is deliberately `read_only_behavior_contract`. It does not auto-execute write/destructive tools and does not claim exhaustive authorization or business-semantic coverage.
 
+## M1.6 Authorization / Negative Contract Replay
+
+M1.6 verifies that supported failures remain failures. It records and replays explicit read-only negative contracts for:
+
+- `invalid_input`
+- `unauthorized`
+- `not_found`
+- `recoverable_error`
+
+Start from:
+
+```text
+templates/negative/contract.json
+```
+
+Record a negative baseline:
+
+```bash
+mpf negative /path/to/plugin \
+  --contract ./negative-contract.json \
+  --verification-evidence evidence/verifications/extensions/<verification-id>/dossier.json \
+  --write-evidence \
+  --pretty
+```
+
+Replay it later:
+
+```bash
+mpf negative /path/to/plugin \
+  --contract ./negative-contract.json \
+  --baseline evidence/negative/extensions/<negative-id>.json \
+  --verification-evidence evidence/verifications/extensions/<verification-id>/dossier.json \
+  --pretty
+```
+
+Negative cases must expect `tool_error`, `protocol_error`, or `http_error`. If a negative case unexpectedly succeeds, the run fails even if the returned shape is otherwise stable.
+
+Like M1.5, M1.6 refuses any tool without `annotations.readOnlyHint=true` before sending `tools/call`.
+
+For authorization replay, `category=unauthorized` uses `request_context=anonymous` and is supported only for streamable-HTTP MCP servers. MPF first uses the configured authenticated connection to inspect the live tool descriptor, then performs one tool call with the `Authorization` header omitted. A 401 contract requires `WWW-Authenticate` by default.
+
+Evidence stores only:
+
+- argument SHA-256
+- failure outcome class
+- protocol error code
+- HTTP status
+- whether `WWW-Authenticate` was present
+- SHA-256 of the challenge header when present
+- content types
+- privacy-reduced structured-content shape
+
+Raw arguments, access tokens, HTTP bodies, challenge text, tool-result values, and error messages are not persisted.
+
+Negative baselines may be SHA-bound to an M1.2 verification dossier. Promotion can then require the exact same verification binding:
+
+```bash
+mpf promote /path/to/plugin \
+  --release-metadata ./release.json \
+  --verification-evidence evidence/verifications/extensions/<verification-id>/dossier.json \
+  --negative-contract ./negative-contract.json \
+  --negative-baseline evidence/negative/extensions/<baseline-id>.json \
+  --write
+```
+
+When enabled, M1.6 runs after the M1.4 freshness gate. A changed error code, missing auth challenge, unexpected success, or other negative-contract drift adds `verification_negative_contract_stale`.
+
+Promoted release evidence includes `verification/negative-baseline.json` and `verification/negative-replay.json`, both outside `plugin.zip`.
+
+M1.6 deliberately does not auto-execute write/destructive tools or exhaustively test every OAuth scope/role combination. Its authorization replay covers the anonymous/no-Authorization boundary for explicitly read-only HTTP tools.
+
 ## Evidence states
 
 The factory uses only:
@@ -668,7 +741,7 @@ A stronger evidence state is never claimed without corresponding proof or explic
 PYTHONPATH=src python -m unittest discover -s tests -v
 ```
 
-Coverage includes the full M0.1-M1.5 pipeline, including deterministic ZIP generation, bundle overwrite safety, MCP-specific submission blockers, local install evidence, path containment, and secret-bearing metadata rejection.
+Coverage includes the full M0.1-M1.6 pipeline, including deterministic ZIP generation, bundle overwrite safety, MCP-specific submission blockers, local install evidence, path containment, and secret-bearing metadata rejection.
 
 ## Source of truth
 

@@ -16,6 +16,7 @@ from .bundle import (
 )
 from .freshness import FreshnessError, run_verification_freshness
 from .marketplace import plugin_package_digest
+from .negative import NegativeContractError, run_negative_contract
 
 SCHEMA_VERSION = "0.1"
 DEFAULT_VERIFICATIONS_ROOT = "evidence/verifications/extensions"
@@ -39,10 +40,16 @@ def run_verification_promotion(
     timeout: float = 5.0,
     canary_contract: str | None = None,
     canary_baseline: str | None = None,
+    negative_contract: str | None = None,
+    negative_baseline: str | None = None,
 ) -> dict[str, Any]:
     if bool(canary_contract) != bool(canary_baseline):
         raise PromotionError(
             "behavior canary promotion requires both canary_contract and canary_baseline"
+        )
+    if bool(negative_contract) != bool(negative_baseline):
+        raise PromotionError(
+            "negative contract promotion requires both negative_contract and negative_baseline"
         )
 
     try:
@@ -83,6 +90,32 @@ def run_verification_promotion(
         except CanaryError as exc:
             raise PromotionError(str(exc)) from exc
 
+    negative = None
+    negative_baseline_payload = None
+    if negative_contract and negative_baseline:
+        try:
+            negative = run_negative_contract(
+                root,
+                contract=negative_contract,
+                baseline_evidence=negative_baseline,
+                verification_evidence=verification_evidence,
+                server=server,
+                mode=runtime_mode,
+                timeout=timeout,
+                write_evidence=False,
+            )
+            negative_baseline_path = _safe_existing_file(
+                root,
+                negative_baseline,
+                label="negative baseline evidence",
+            )
+            negative_baseline_payload = _load_json_object(
+                negative_baseline_path,
+                "negative baseline evidence",
+            )
+        except NegativeContractError as exc:
+            raise PromotionError(str(exc)) from exc
+
     return compile_verification_promotion(
         root,
         release_metadata=release_metadata,
@@ -95,6 +128,9 @@ def run_verification_promotion(
         behavior_report=behavior,
         enforce_behavior=bool(behavior),
         canary_baseline_payload=baseline_payload,
+        negative_report=negative,
+        enforce_negative=bool(negative),
+        negative_baseline_payload=negative_baseline_payload,
     )
 
 
@@ -111,6 +147,9 @@ def compile_verification_promotion(
     behavior_report: dict[str, Any] | None = None,
     enforce_behavior: bool = False,
     canary_baseline_payload: dict[str, Any] | None = None,
+    negative_report: dict[str, Any] | None = None,
+    enforce_negative: bool = False,
+    negative_baseline_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     root = root.expanduser().resolve()
     if not root.exists() or not root.is_dir():
@@ -207,6 +246,25 @@ def compile_verification_promotion(
                 "baseline": deepcopy(behavior_report.get("baseline") or {}),
             }
 
+    negative_valid = True
+    negative_summary: dict[str, Any] | None = None
+    if enforce_negative:
+        negative_valid = bool(
+            isinstance(negative_report, dict)
+            and negative_report.get("mode") == "replay"
+            and negative_report.get("negative_verified") is True
+        )
+        if isinstance(negative_report, dict):
+            negative_summary = {
+                "negative_id": negative_report.get("negative_id"),
+                "negative_verified": negative_report.get("negative_verified") is True,
+                "negative_passed": negative_report.get("negative_passed") is True,
+                "blocking_reasons": negative_report.get("blocking_reasons") or [],
+                "scope": negative_report.get("scope"),
+                "contract": deepcopy(negative_report.get("contract") or {}),
+                "baseline": deepcopy(negative_report.get("baseline") or {}),
+            }
+
     gate_passed = bool(
         validation["valid"]
         and package_bound
@@ -214,6 +272,7 @@ def compile_verification_promotion(
         and state_satisfies
         and freshness_valid
         and behavior_valid
+        and negative_valid
     )
 
     verification_blockers: list[str] = []
@@ -266,6 +325,15 @@ def compile_verification_promotion(
             verification_blockers.append(
                 "verification_behavior_canary_stale"
             )
+    if enforce_negative:
+        if not isinstance(negative_report, dict):
+            verification_blockers.append(
+                "verification_negative_contract_missing"
+            )
+        elif not negative_report.get("negative_verified"):
+            verification_blockers.append(
+                "verification_negative_contract_stale"
+            )
     verification_blockers = _unique(verification_blockers)
 
     try:
@@ -296,6 +364,11 @@ def compile_verification_promotion(
         canary_id=(
             behavior_report.get("canary_id")
             if isinstance(behavior_report, dict)
+            else None
+        ),
+        negative_id=(
+            negative_report.get("negative_id")
+            if isinstance(negative_report, dict)
             else None
         ),
     )
@@ -329,6 +402,8 @@ def compile_verification_promotion(
         "freshness": freshness_summary,
         "behavior_canary_required": enforce_behavior,
         "behavior_canary": behavior_summary,
+        "negative_contract_required": enforce_negative,
+        "negative_contract": negative_summary,
         "passed": gate_passed,
     }
 
@@ -366,6 +441,13 @@ def compile_verification_promotion(
         promoted_bundle["artifacts"][
             "canary_baseline"
         ] = "verification/canary-baseline.json"
+    if enforce_negative:
+        promoted_bundle["artifacts"][
+            "negative_replay"
+        ] = "verification/negative-replay.json"
+        promoted_bundle["artifacts"][
+            "negative_baseline"
+        ] = "verification/negative-baseline.json"
 
     return {
         "schema_version": SCHEMA_VERSION,
@@ -405,6 +487,12 @@ def compile_verification_promotion(
         else None,
         "_canary_baseline": deepcopy(canary_baseline_payload)
         if isinstance(canary_baseline_payload, dict)
+        else None,
+        "_negative_report": deepcopy(negative_report)
+        if isinstance(negative_report, dict)
+        else None,
+        "_negative_baseline": deepcopy(negative_baseline_payload)
+        if isinstance(negative_baseline_payload, dict)
         else None,
     }
 
@@ -448,6 +536,8 @@ def write_promoted_release(
     freshness_report = report.get("_freshness_report")
     behavior_report = report.get("_behavior_report")
     canary_baseline = report.get("_canary_baseline")
+    negative_report = report.get("_negative_report")
+    negative_baseline = report.get("_negative_baseline")
     if not isinstance(dossier, dict):
         raise PromotionError(
             "promotion report is missing verification dossier"
@@ -481,6 +571,14 @@ def write_promoted_release(
     if isinstance(canary_baseline, dict):
         extra["verification/canary-baseline.json"] = _json_bytes(
             canary_baseline
+        )
+    if isinstance(negative_report, dict):
+        extra["verification/negative-replay.json"] = _json_bytes(
+            negative_report
+        )
+    if isinstance(negative_baseline, dict):
+        extra["verification/negative-baseline.json"] = _json_bytes(
+            negative_baseline
         )
 
     written: list[str] = []
@@ -530,6 +628,8 @@ def public_promotion_report(
             "_freshness_report",
             "_behavior_report",
             "_canary_baseline",
+            "_negative_report",
+            "_negative_baseline",
         }
     }
 
@@ -703,6 +803,7 @@ def _promotion_id(
     requirement: str,
     freshness_id: str | None,
     canary_id: str | None,
+    negative_id: str | None,
 ) -> str:
     payload = {
         "bundle_id": bundle_id,
@@ -711,6 +812,7 @@ def _promotion_id(
         "requirement": requirement,
         "freshness_id": freshness_id,
         "canary_id": canary_id,
+        "negative_id": negative_id,
     }
     return hashlib.sha256(
         json.dumps(

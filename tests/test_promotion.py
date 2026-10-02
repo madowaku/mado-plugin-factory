@@ -13,6 +13,7 @@ from mado_plugin_factory.evals import (
     compile_submission_evals,
     write_submission_evals,
 )
+from mado_plugin_factory.negative import run_negative_contract
 from mado_plugin_factory.orchestrator import (
     run_extension_verification,
     write_verification_dossier,
@@ -31,6 +32,7 @@ import json
 import sys
 
 BEHAVIOR = "v1"
+NEGATIVE_CODE = -32602
 
 def send(value):
     sys.stdout.write(json.dumps(value) + "\n")
@@ -96,6 +98,16 @@ for line in sys.stdin:
                         }
                     },
                     {
+                        "name": "negative.invalid",
+                        "description": "Reject invalid deterministic promotion input.",
+                        "inputSchema": {"type": "object", "properties": {"identifier": {"type": "string"}}},
+                        "annotations": {
+                            "readOnlyHint": True,
+                            "openWorldHint": False,
+                            "destructiveHint": False
+                        }
+                    },
+                    {
                         "name": "app.open",
                         "inputSchema": {"type": "object", "properties": {}},
                         "_meta": {
@@ -118,6 +130,15 @@ for line in sys.stdin:
                     "content": [{"type": "text", "text": "canary"}],
                     "structuredContent": {"status": BEHAVIOR},
                     "isError": False
+                }
+            })
+        elif params.get("name") == "negative.invalid":
+            send({
+                "jsonrpc": "2.0",
+                "id": ident,
+                "error": {
+                    "code": NEGATIVE_CODE,
+                    "message": "invalid fixture input"
                 }
             })
         else:
@@ -416,6 +437,47 @@ def _canary_baseline(root: Path, dossier: str) -> tuple[str, str]:
         raise AssertionError(report)
     return "canary-contract.json", report["evidence_output"]
 
+
+
+
+def _negative_baseline(root: Path, dossier: str) -> tuple[str, str]:
+    contract = root / "negative-contract.json"
+    contract.write_text(
+        json.dumps(
+            {
+                "server": "fixture",
+                "cases": [
+                    {
+                        "id": "invalid-input",
+                        "category": "invalid_input",
+                        "tool": "negative.invalid",
+                        "arguments": {
+                            "identifier": "invalid"
+                        },
+                        "expect": {
+                            "outcome": "protocol_error",
+                            "protocol_error_code": -32602,
+                            "structured_content": "forbidden",
+                            "content_types": []
+                        }
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    report = run_negative_contract(
+        root,
+        contract="negative-contract.json",
+        verification_evidence=dossier,
+        write_evidence=True,
+    )
+    if not report["negative_passed"]:
+        raise AssertionError(report)
+    return (
+        "negative-contract.json",
+        report["evidence_output"],
+    )
 
 
 def _verification(
@@ -837,6 +899,109 @@ class VerificationPromotionGateTests(unittest.TestCase):
             self.assertIn(
                 "verification_behavior_canary_stale",
                 report["blocking_reasons"],
+            )
+
+    def test_negative_contract_drift_blocks_live_promotion_after_freshness_passes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "plugin"
+            _make_plugin(root, host_required=False)
+            _make_release_evidence(root)
+            dossier = _verification(
+                root,
+                host_required=False,
+            )
+            contract, baseline = _negative_baseline(
+                root,
+                dossier,
+            )
+
+            server = root / "server.py"
+            server.write_text(
+                server.read_text(encoding="utf-8").replace(
+                    "NEGATIVE_CODE = -32602",
+                    "NEGATIVE_CODE = -32099",
+                ),
+                encoding="utf-8",
+            )
+
+            report = run_verification_promotion(
+                root,
+                release_metadata=_release_metadata(),
+                verification_evidence=dossier,
+                negative_contract=contract,
+                negative_baseline=baseline,
+            )
+
+            self.assertFalse(report["promotion_ready"])
+            self.assertTrue(
+                report["verification"]["freshness"][
+                    "freshness_verified"
+                ]
+            )
+            self.assertFalse(
+                report["verification"]["negative_contract"][
+                    "negative_verified"
+                ]
+            )
+            self.assertIn(
+                "verification_negative_contract_stale",
+                report["blocking_reasons"],
+            )
+
+    def test_successful_negative_replay_is_copied_outside_plugin_zip(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "plugin"
+            _make_plugin(root, host_required=False)
+            _make_release_evidence(root)
+            dossier = _verification(
+                root,
+                host_required=False,
+            )
+            contract, baseline = _negative_baseline(
+                root,
+                dossier,
+            )
+
+            report = run_verification_promotion(
+                root,
+                release_metadata=_release_metadata(),
+                verification_evidence=dossier,
+                negative_contract=contract,
+                negative_baseline=baseline,
+            )
+            self.assertTrue(report["promotion_ready"])
+
+            result = write_promoted_release(
+                root,
+                report,
+            )
+            release = Path(result["bundle_root"])
+            self.assertTrue(
+                (
+                    release
+                    / "verification"
+                    / "negative-baseline.json"
+                ).is_file()
+            )
+            self.assertTrue(
+                (
+                    release
+                    / "verification"
+                    / "negative-replay.json"
+                ).is_file()
+            )
+            with zipfile.ZipFile(
+                release / "plugin.zip",
+                "r",
+            ) as archive:
+                names = set(archive.namelist())
+            self.assertNotIn(
+                "verification/negative-baseline.json",
+                names,
+            )
+            self.assertNotIn(
+                "verification/negative-replay.json",
+                names,
             )
 
     def test_cli_promotes_verified_release(self):

@@ -8,6 +8,7 @@ from .extensions import compile_extension_capabilities
 from .freshness import run_verification_freshness
 from .host import run_host_replay
 from .manifest import compile_manifest, validate_manifest
+from .negative import run_negative_contract
 from .orchestrator import run_extension_verification
 from .promotion import compile_verification_promotion, run_verification_promotion
 from .marketplace import (
@@ -24,6 +25,7 @@ __all__ = [
     "compile_extension_capabilities",
     "normalize_host_capture",
     "run_behavior_canary",
+    "run_negative_contract",
     "compile_extension_scaffold",
     "compile_extension_patch",
     "run_extension_runtime_smoke",
@@ -43,4 +45,4 @@ __all__ = [
     "validate_submission_evals",
     "verify_marketplace_install",
 ]
-__version__ = "1.5.0"
+__version__ = "1.6.0"

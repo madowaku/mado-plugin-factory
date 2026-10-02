@@ -47,6 +47,7 @@ from .marketplace import (
     write_install_evidence,
     write_marketplace_bridge,
 )
+from .negative import NegativeContractError, run_negative_contract
 from .orchestrator import (
     VerificationOrchestratorError,
     public_verification_report,
@@ -342,6 +343,19 @@ def build_parser() -> argparse.ArgumentParser:
     canary.add_argument("--force", action="store_true", help="Replace differing canary evidence")
     canary.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
 
+    negative = sub.add_parser("negative", help="Record or replay read-only negative and authorization MCP contracts")
+    negative.add_argument("path", nargs="?", default=".", help="Plugin candidate directory")
+    negative.add_argument("--contract", required=True, help="Relative negative contract JSON")
+    negative.add_argument("--baseline", help="Relative recorded negative evidence for replay; omit to record a baseline")
+    negative.add_argument("--verification-evidence", help="Relative verified M1.2 dossier to bind the negative baseline/replay")
+    negative.add_argument("--server", help="MCP server name; falls back to contract/default server")
+    negative.add_argument("--mode", default="auto", choices=["auto", "modern", "legacy"], help="MCP protocol era preference (default: auto)")
+    negative.add_argument("--timeout", type=float, default=5.0, help="Per-request MCP timeout in seconds (default: 5)")
+    negative.add_argument("--write-evidence", action="store_true", help="Persist baseline/replay negative evidence")
+    negative.add_argument("--evidence-output", help="Relative negative evidence output path")
+    negative.add_argument("--force", action="store_true", help="Replace differing negative evidence")
+    negative.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
+
     freshness = sub.add_parser("freshness", help="Re-probe MCP runtime and compare with an M1.2 verification baseline")
     freshness.add_argument("path", nargs="?", default=".", help="Plugin candidate directory")
     freshness.add_argument("--verification-evidence", required=True, help="Relative M1.2 dossier.json path")
@@ -378,6 +392,8 @@ def build_parser() -> argparse.ArgumentParser:
     promote.add_argument("--timeout", type=float, default=5.0, help="Per-request freshness/canary timeout in seconds (default: 5)")
     promote.add_argument("--canary-contract", help="Relative behavioral canary contract JSON; requires --canary-baseline")
     promote.add_argument("--canary-baseline", help="Relative recorded M1.5 canary baseline; requires --canary-contract")
+    promote.add_argument("--negative-contract", help="Relative M1.6 negative contract JSON; requires --negative-baseline")
+    promote.add_argument("--negative-baseline", help="Relative recorded M1.6 negative baseline; requires --negative-contract")
     promote.add_argument("--output", help="Relative release directory; defaults to evidence/releases/<plugin-version>")
     promote.add_argument("--write", action="store_true", help="Write promoted release bundle plus verification bridge evidence")
     promote.add_argument("--force", action="store_true", help="Replace differing release/promotion artifacts")
@@ -436,6 +452,8 @@ def main(argv: list[str] | None = None) -> int:
             return _run_marketplace_verify(args)
     if args.command == "canary":
         return _run_canary(args)
+    if args.command == "negative":
+        return _run_negative(args)
     if args.command == "freshness":
         return _run_freshness(args)
     if args.command == "promote":
@@ -745,6 +763,30 @@ def _run_canary(args: argparse.Namespace) -> int:
     return 0 if report["canary_verified"] else 2
 
 
+def _run_negative(args: argparse.Namespace) -> int:
+    try:
+        report = run_negative_contract(
+            Path(args.path),
+            contract=args.contract,
+            baseline_evidence=args.baseline,
+            verification_evidence=args.verification_evidence,
+            server=args.server,
+            mode=args.mode,
+            timeout=args.timeout,
+            write_evidence=args.write_evidence,
+            evidence_output=args.evidence_output,
+            force=args.force,
+        )
+    except NegativeContractError as exc:
+        _print_error(str(exc))
+        return 1
+
+    _print_json(report, pretty=args.pretty)
+    if report["mode"] == "record":
+        return 0 if report["negative_passed"] else 2
+    return 0 if report["negative_verified"] else 2
+
+
 def _run_freshness(args: argparse.Namespace) -> int:
     try:
         report = run_verification_freshness(
@@ -780,6 +822,8 @@ def _run_promote(args: argparse.Namespace) -> int:
             timeout=args.timeout,
             canary_contract=args.canary_contract,
             canary_baseline=args.canary_baseline,
+            negative_contract=args.negative_contract,
+            negative_baseline=args.negative_baseline,
         )
         if args.write:
             report["write_result"] = write_promoted_release(
