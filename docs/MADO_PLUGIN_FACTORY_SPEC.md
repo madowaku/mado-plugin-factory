@@ -1,6 +1,6 @@
-# MADO_PLUGIN_FACTORY_SPEC.md v0.6
+# MADO_PLUGIN_FACTORY_SPEC.md v0.7
 
-Status: Implemented through M0.6  
+Status: Implemented through M0.7  
 Project: MADO Plugin Factory  
 Repository: `madowaku/mado-plugin-factory`
 
@@ -28,6 +28,9 @@ Submission Evidence Bundle       <- M0.5 complete
   |
   v
 Extension Capability Compiler     <- M0.6 complete
+  |
+  v
+Extension Scaffold Generator      <- M0.7 complete
 ```
 
 The factory separates "generated", "inspected", and "executed" evidence and refuses to turn missing proof into a release claim.
@@ -430,7 +433,67 @@ It MUST NOT infer that ChatGPT successfully rendered or executed the extension f
 
 The report records the documented platform surface for each extension. File handlers and composer mentions remain desktop-only in the current extension spec, while OpenAI form elicitation is documented for desktop and web. Registered MCP servers also require MCP 2026-07-28 or later with MRTR for form elicitation.
 
-## 8. Safety rules
+## 8. MPF-M0.7 Extension Scaffold Generator
+
+Status: complete.
+
+### 8.1 Goal
+
+Turn M0.6 capability inspection into deterministic implementation proposals without silently modifying the active plugin runtime.
+
+### 8.2 CLI
+
+```bash
+mpf scaffold <plugin-root> --pretty
+mpf scaffold <plugin-root> --write
+```
+
+Optional controls:
+
+- repeat `--extension <id>` to select surfaces
+- repeat `--file-extension .ext` for file viewer/editor scaffolds
+- `--output <relative-directory>`
+- `--force`
+
+### 8.3 Default output
+
+```text
+evidence/scaffolds/extensions/
+  plan.json
+  README.md
+  apply/
+    extensions/openai/<extension>.ts
+    skills/plugin-onboarding/SKILL.md
+    manifest.patch.json
+```
+
+The output lives under evidence by default so Scanner and M0.6 do not mistake proposed code for active implementation evidence.
+
+### 8.4 Generation rules
+
+- `detected` capabilities are skipped as already implemented
+- `blocked` capabilities are skipped with their blockers preserved
+- `eligible` capabilities receive a scaffold
+- `needs_input` capabilities generate only when required input is supplied or another selected scaffold satisfies the dependency
+- file viewer/editor requires at least one explicit suffix
+- deep links can scaffold when a sidebar/global entrypoint is already detected or is generated in the same pack
+- onboarding produces a proposed Skill plus a manifest patch rather than silently editing `plugin.json`
+
+### 8.5 Evidence discipline
+
+Generated scaffold files are `generated` evidence. They MUST NOT upgrade an extension to detected or runtime-verified until the proposal is deliberately applied to the active package and later inspected/executed.
+
+### 8.6 Write safety
+
+The scaffold writer:
+
+- only writes inside the plugin root
+- rejects absolute paths and parent traversal
+- refuses symlink targets
+- is idempotent for identical bytes
+- requires `--force` to replace differing generated files
+
+## 9. Safety rules
 
 M0.5 MUST NOT:
 
@@ -445,7 +508,7 @@ M0.5 MUST NOT:
 - write outside the plugin root
 - silently overwrite a differing release bundle
 
-## 9. Acceptance
+## 10. Acceptance
 
 MPF-M0.5 is complete when:
 
@@ -476,7 +539,22 @@ MPF-M0.6 is complete when:
 - scanner output remains stable after writing extension evidence
 - unit/CI tests cover detection, eligibility, blockers, onboarding, path safety, and CLI behavior
 
-## 10. North star
+### MPF-M0.7 acceptance
+
+MPF-M0.7 is complete when:
+
+- one command compiles a deterministic scaffold plan
+- default selection follows M0.6 actionable capabilities
+- explicit extension selection is validated
+- detected and blocked capabilities are never silently scaffolded
+- file viewer/editor requires explicit suffix input
+- deep-link dependency on a global entrypoint is modeled across the same scaffold pack
+- onboarding emits a proposed Skill and manifest patch without editing the live manifest
+- proposed files are isolated from active source detection by default
+- writes are contained, idempotent, and overwrite-safe
+- unit/CI tests cover selection, prerequisites, generated content, path safety, and CLI behavior
+
+## 11. North star
 
 ```text
 "I have a useful Skill"
