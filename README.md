@@ -22,6 +22,7 @@ Skill / Repo
   -> MPF-M1.4 Verification Freshness / Remote MCP Drift Gate
   -> MPF-M1.5 Behavioral Contract Replay / Remote MCP Canary
   -> MPF-M1.6 Authorization / Negative Contract Replay
+  -> MPF-M1.7 Credential Matrix / Scope Boundary Replay
 ```
 
 ## Status
@@ -43,8 +44,9 @@ Skill / Repo
 - **MPF-M1.4 Verification Freshness / Remote MCP Drift Gate** ✅
 - **MPF-M1.5 Behavioral Contract Replay / Remote MCP Canary** ✅
 - **MPF-M1.6 Authorization / Negative Contract Replay** ✅
+- **MPF-M1.7 Credential Matrix / Scope Boundary Replay** ✅
 
-Current package version: `1.6.0`.
+Current package version: `1.7.0`.
 
 ## M0.1 Candidate Scanner
 
@@ -725,6 +727,65 @@ Promoted release evidence includes `verification/negative-baseline.json` and `ve
 
 M1.6 deliberately does not auto-execute write/destructive tools or exhaustively test every OAuth scope/role combination. Its authorization replay covers the anonymous/no-Authorization boundary for explicitly read-only HTTP tools.
 
+## M1.7 Credential Matrix / Scope Boundary Replay
+
+M1.7 expands authorization evidence from the anonymous boundary into an explicit credential/scope matrix for **read-only streamable-HTTP tools**.
+
+Start from:
+
+```text
+templates/credentials/matrix.json
+```
+
+Credential profiles never contain raw tokens. Supported profile kinds are:
+
+- `configured`: reuse the MCP connection credential already configured in `mcp.json`
+- `anonymous`: omit `Authorization`
+- `bearer_env`: load a bearer token from an environment variable at execution time
+
+Example record:
+
+```bash
+mpf credential-matrix /path/to/plugin \
+  --contract ./credential-matrix.json \
+  --verification-evidence evidence/verifications/extensions/<verification-id>/dossier.json \
+  --write-evidence \
+  --pretty
+```
+
+Replay:
+
+```bash
+mpf credential-matrix /path/to/plugin \
+  --contract ./credential-matrix.json \
+  --baseline evidence/credentials/extensions/<matrix-id>.json \
+  --verification-evidence evidence/verifications/extensions/<verification-id>/dossier.json \
+  --pretty
+```
+
+A matrix can model profiles such as anonymous, viewer, editor, admin, expired-token, wrong-audience, and missing-scope, then assert allow/deny behavior per read-only tool. Cases can expect success, tool errors, protocol errors, or HTTP failures, including HTTP status and authentication-challenge presence.
+
+Before every profile call, MPF uses the configured authenticated MCP connection to discover the tool and requires `annotations.readOnlyHint=true`. The selected profile credential is applied only to the subsequent canary `tools/call`.
+
+For `bearer_env`, the contract stores only the environment variable reference. Executed evidence does **not** persist the env name or token. It records credential profile ID/kind, argument hash, status/error class, challenge presence/hash, result shape, content types, and declared stable-path hashes.
+
+M1.7 baselines can be SHA-bound to the exact M1.2 verification dossier. Contract/profile changes invalidate the baseline.
+
+Promotion can opt into the matrix gate:
+
+```bash
+mpf promote /path/to/plugin \
+  --release-metadata ./release.json \
+  --verification-evidence evidence/verifications/extensions/<verification-id>/dossier.json \
+  --credential-matrix ./credential-matrix.json \
+  --credential-baseline evidence/credentials/extensions/<baseline-id>.json \
+  --write
+```
+
+When enabled, a scope/role boundary change adds `verification_credential_matrix_stale`. Promoted evidence includes `verification/credential-matrix-baseline.json` and `verification/credential-matrix-replay.json`, outside `plugin.zip`.
+
+M1.7 deliberately remains read-only and profile-driven. It does not execute destructive actions or claim exhaustive coverage of every organization policy, role, OAuth scope, or account state.
+
 ## Evidence states
 
 The factory uses only:
@@ -741,7 +802,7 @@ A stronger evidence state is never claimed without corresponding proof or explic
 PYTHONPATH=src python -m unittest discover -s tests -v
 ```
 
-Coverage includes the full M0.1-M1.6 pipeline, including deterministic ZIP generation, bundle overwrite safety, MCP-specific submission blockers, local install evidence, path containment, and secret-bearing metadata rejection.
+Coverage includes the full M0.1-M1.7 pipeline, including deterministic ZIP generation, bundle overwrite safety, MCP-specific submission blockers, local install evidence, path containment, and secret-bearing metadata rejection.
 
 ## Source of truth
 
