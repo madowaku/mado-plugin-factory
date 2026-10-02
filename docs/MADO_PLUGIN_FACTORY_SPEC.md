@@ -1,6 +1,6 @@
-# MADO_PLUGIN_FACTORY_SPEC.md v1.3
+# MADO_PLUGIN_FACTORY_SPEC.md v1.4
 
-Status: Implemented through M1.3  
+Status: Implemented through M1.4  
 Project: MADO Plugin Factory  
 Repository: `madowaku/mado-plugin-factory`
 
@@ -49,6 +49,9 @@ Extension Verification Orchestrator <- M1.2 complete
   |
   v
 Verification Promotion Gate / Release Bundle Bridge <- M1.3 complete
+  |
+  v
+Verification Freshness / Remote MCP Drift Gate <- M1.4 complete
 ```
 
 The factory separates "generated", "inspected", and "executed" evidence and refuses to turn missing proof into a release claim.
@@ -1048,7 +1051,72 @@ Changing any of these produces a new promotion identity.
 
 M1.3 does not replace OpenAI review or claim that promotion guarantees approval. It records that MPF release material and the selected verification evidence satisfy the configured internal promotion policy for the exact package digest.
 
-## 15. Safety rules
+## 15. MPF-M1.4 Verification Freshness / Remote MCP Drift Gate
+
+Status: complete.
+
+### 15.1 Goal
+
+Detect remote MCP drift that cannot be seen through the packaged plugin digest, and require a live-fresh runtime surface before CLI promotion can succeed.
+
+### 15.2 Runtime fingerprint
+
+M0.9 now emits `runtime_fingerprint` with one overall SHA-256 plus component hashes for:
+
+- negotiated protocol version/era
+- advertised server capabilities
+- normalized tool descriptors
+- referenced MCP App resource observations
+
+Tool descriptors include names, titles, descriptions, input/output schemas, annotations, security metadata, and relevant OpenAI/UI metadata. Resource observations include MIME/UI metadata and a SHA-256 of returned content without persisting raw HTML/blob content.
+
+`serverInfo` is not part of the gate fingerprint because it is self-reported display/debug metadata.
+
+### 15.3 Freshness CLI
+
+```bash
+mpf freshness <plugin-root> \\
+  --verification-evidence evidence/verifications/extensions/<id>/dossier.json \\
+  --pretty
+```
+
+Optional controls:
+
+- `--server <name>`
+- `--mode auto|modern|legacy`
+- `--timeout <seconds>`
+- `--write-evidence`
+- `--evidence-output <relative-file>`
+- `--force`
+
+The selected server must match the server recorded by the M1.2 runtime artifact.
+
+### 15.4 Drift verdict
+
+Freshness is verified only when:
+
+- the baseline runtime artifact is still bound to the dossier hash
+- the baseline contains an M1.4 runtime fingerprint
+- the current MCP runtime smoke passes
+- the current overall fingerprint exactly matches the baseline fingerprint
+
+The report lists changed fingerprint components and added/removed tool names and resource URIs.
+
+### 15.5 Promotion integration
+
+`mpf promote` now runs a live M1.4 freshness probe automatically before compiling the final promotion verdict. A stale or missing fingerprint adds a verification freshness blocker even when M1.3 package/evidence checks otherwise pass.
+
+The lower-level static `compile_verification_promotion()` API remains available for compatibility. Live CLI promotion uses the new freshness-aware wrapper.
+
+### 15.6 Promoted release evidence
+
+When live promotion runs, `verification/freshness.json` is copied beside the M1.2 verification evidence. It remains outside `plugin.zip`.
+
+### 15.7 Scope boundary
+
+M1.4 proves freshness of the **advertised MCP surface**. It does not prove that tool business behavior, external dependencies, or authorization enforcement are unchanged when those changes do not alter the advertised protocol/tool/resource surface.
+
+## 16. Safety rules
 
 M0.5 MUST NOT:
 
@@ -1063,7 +1131,7 @@ M0.5 MUST NOT:
 - write outside the plugin root
 - silently overwrite a differing release bundle
 
-## 16. Acceptance
+## 17. Acceptance
 
 MPF-M0.5 is complete when:
 
@@ -1211,7 +1279,23 @@ MPF-M1.3 is complete when:
 - CLI exit codes distinguish promoted, verification-blocked, release-blocked, and invalid states
 - unit/CI tests cover host/server policy, package drift, unattested host evidence, stage tampering, legacy dossier rejection, ZIP isolation, skills-only rejection, public report privacy, and CLI behavior
 
-## 17. North star
+### MPF-M1.4 acceptance
+
+MPF-M1.4 is complete when:
+
+- M0.9 records deterministic protocol/tool/resource fingerprints
+- raw resource content remains out of evidence while content drift remains detectable
+- serverInfo-only changes do not create a freshness failure
+- unchanged runtime surfaces pass a standalone freshness probe
+- tool descriptor and UI resource content drift fail freshness even when package digest is unchanged
+- baseline runtime artifacts remain dossier-hash bound before comparison
+- CLI promotion automatically performs a live freshness check
+- stale remote MCP surfaces block promotion without changing M0.5 submission readiness semantics
+- promoted release evidence includes the freshness report outside the plugin ZIP
+- freshness evidence writes are contained and overwrite-safe
+- unit/CI tests cover fresh, tool drift, resource drift, serverInfo exclusion, baseline tamper, standalone CLI, and live promotion blocking
+
+## 18. North star
 
 ```text
 "I have a useful Skill"
