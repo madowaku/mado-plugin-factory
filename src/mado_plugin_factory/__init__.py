@@ -4,10 +4,11 @@ from .capture import normalize_host_capture
 from .bundle import compile_submission_bundle
 from .evals import compile_submission_evals, validate_submission_evals
 from .extensions import compile_extension_capabilities
+from .freshness import run_verification_freshness
 from .host import run_host_replay
 from .manifest import compile_manifest, validate_manifest
 from .orchestrator import run_extension_verification
-from .promotion import compile_verification_promotion
+from .promotion import compile_verification_promotion, run_verification_promotion
 from .marketplace import (
     compile_marketplace_bridge,
     validate_marketplace_catalog,
@@ -26,6 +27,8 @@ __all__ = [
     "run_extension_runtime_smoke",
     "run_host_replay",
     "run_extension_verification",
+    "run_verification_freshness",
+    "run_verification_promotion",
     "compile_verification_promotion",
     "apply_extension_patch",
     "compile_manifest",
@@ -38,4 +41,4 @@ __all__ = [
     "validate_submission_evals",
     "verify_marketplace_install",
 ]
-__version__ = "1.3.0"
+__version__ = "1.4.0"
