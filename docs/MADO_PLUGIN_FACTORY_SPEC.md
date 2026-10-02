@@ -1,6 +1,6 @@
-# MADO_PLUGIN_FACTORY_SPEC.md v1.2
+# MADO_PLUGIN_FACTORY_SPEC.md v1.3
 
-Status: Implemented through M1.2  
+Status: Implemented through M1.3  
 Project: MADO Plugin Factory  
 Repository: `madowaku/mado-plugin-factory`
 
@@ -46,6 +46,9 @@ Host Trace Capture / Normalizer    <- M1.1 complete
   |
   v
 Extension Verification Orchestrator <- M1.2 complete
+  |
+  v
+Verification Promotion Gate / Release Bundle Bridge <- M1.3 complete
 ```
 
 The factory separates "generated", "inspected", and "executed" evidence and refuses to turn missing proof into a release claim.
@@ -938,7 +941,114 @@ The dossier writer:
 
 M1.2 does not strengthen any stage beyond its source evidence. M0.9 remains the MCP runtime proof, M1.1 remains inspected capture normalization, and M1.0 remains the host acceptance gate. M1.2 only binds these stages into one run and one operator-facing verdict.
 
-## 14. Safety rules
+## 14. MPF-M1.3 Verification Promotion Gate / Release Bundle Bridge
+
+Status: complete.
+
+### 14.1 Goal
+
+Promote a successful M1.2 verification run into the release dossier without confusing MPF verification policy with OpenAI portal submission requirements, and without allowing a verification result to survive package or evidence drift.
+
+### 14.2 CLI
+
+```bash
+mpf promote <plugin-root> \\
+  --release-metadata ./release.json \\
+  --verification-evidence evidence/verifications/extensions/<id>/dossier.json \\
+  --write
+```
+
+Optional controls:
+
+- `--requirement auto|mcp_server|chatgpt_host`
+- `--eval-evidence <relative-file>`
+- `--install-evidence <relative-file>`
+- `--output <relative-release-directory>`
+- `--force`
+- `--pretty`
+
+### 14.3 Package binding
+
+M1.2 records `source.plugin_package_digest` and incorporates it into the verification ID. M1.3 recomputes the current `plugin_package_digest` and requires an exact match before verification can pass the promotion gate.
+
+A package change after verification therefore produces `verification_package_digest_mismatch`. Older M1.2 dossiers that lack the package digest are rejected with `verification_package_digest_missing` rather than being grandfathered into a stronger claim.
+
+This digest binds the packaged plugin surfaces. Remote MCP server deployments remain independently mutable; after a server change, operators should rerun M1.2 to refresh runtime evidence before promotion.
+
+### 14.4 Verification policy
+
+M1.3 supports three policies:
+
+- `mcp_server`: accept `verified_mcp_server` or the stronger `verified_chatgpt_host`
+- `chatgpt_host`: require `verified_chatgpt_host`
+- `auto`: require `chatgpt_host` when `host_required_extensions` is non-empty, otherwise require `mcp_server`
+
+The selected verification state must also have `verification_verified=true`.
+
+### 14.5 Stage artifact integrity
+
+M1.3 reopens each stage artifact referenced by the M1.2 dossier and canonicalizes the JSON using the same sorted compact representation used by M1.2 digests.
+
+When present, the following bindings are checked:
+
+- runtime stage → `runtime.json`
+- capture stage → `capture.json`
+- normalized trace → `trace.json`
+- host replay stage → `host.json`
+
+A missing, invalid, or digest-mismatched stage artifact blocks promotion.
+
+### 14.6 Release bridge
+
+M1.3 compiles the ordinary M0.5 submission bundle first, then augments a copy of that report with an `extension_verification` check and a `promotion` section.
+
+The existing `upload_ready` and `submission_ready` verdicts retain their M0.5 meaning. M1.3 adds `promotion_ready`, which requires both:
+
+- ordinary M0.5 `submission_ready=true`
+- M1.3 verification gate passed
+
+This is an MPF quality gate. It is not represented as an additional OpenAI portal requirement.
+
+### 14.7 Promoted release output
+
+A promoted release writes the normal deterministic release directory and adds:
+
+```text
+evidence/releases/<version>/
+  promotion.json
+  verification/
+    dossier.json
+    runtime.json
+    capture.json
+    trace.json
+    host.json
+```
+
+Only stage artifacts that exist in the selected M1.2 run are copied. The plugin ZIP remains curated by M0.5 and never contains `evidence/**`, `promotion.json`, or the verification directory.
+
+### 14.8 Promotion identity
+
+`promotion_id` is derived from:
+
+- bundle ID
+- current plugin package digest
+- selected verification dossier SHA-256
+- resolved verification requirement
+
+Changing any of these produces a new promotion identity.
+
+### 14.9 Exit codes
+
+- `0`: release plus verification are promotion-ready
+- `3`: M0.5 submission material is ready but the M1.3 verification gate blocks promotion
+- `2`: the underlying M0.5 submission bundle is not submission-ready
+- `1`: promotion input, validation, or write error
+
+### 14.10 Evidence discipline
+
+M1.3 does not replace OpenAI review or claim that promotion guarantees approval. It records that MPF release material and the selected verification evidence satisfy the configured internal promotion policy for the exact package digest.
+
+## 15. Safety rules
 
 M0.5 MUST NOT:
 
@@ -953,7 +1063,7 @@ M0.5 MUST NOT:
 - write outside the plugin root
 - silently overwrite a differing release bundle
 
-## 15. Acceptance
+## 16. Acceptance
 
 MPF-M0.5 is complete when:
 
@@ -1083,7 +1193,25 @@ MPF-M1.2 is complete when:
 - CLI exit codes distinguish verified, external-evidence wait, verification failure, and orchestrator error
 - unit/CI tests cover runtime-only success, host wait, full host verification, unattested capture, missing host event, runtime metadata failure, privacy, write safety, and CLI behavior
 
-## 16. North star
+### MPF-M1.3 acceptance
+
+MPF-M1.3 is complete when:
+
+- one command combines M0.5 release compilation with an M1.2 verification gate
+- M1.2 verification IDs and dossiers are bound to the plugin package digest
+- package drift after verification blocks promotion
+- older dossiers without package binding are not silently accepted
+- auto policy requires host verification only when host-required extensions exist
+- explicit server and host verification policies are supported
+- runtime/capture/trace/host artifact digests are revalidated before promotion
+- M0.5 submission readiness remains distinct from MPF promotion readiness
+- promoted release directories contain a self-contained privacy-reduced verification evidence copy
+- verification artifacts never enter the plugin ZIP
+- promotion writes remain overwrite-safe and contained inside the plugin root
+- CLI exit codes distinguish promoted, verification-blocked, release-blocked, and invalid states
+- unit/CI tests cover host/server policy, package drift, unattested host evidence, stage tampering, legacy dossier rejection, ZIP isolation, skills-only rejection, public report privacy, and CLI behavior
+
+## 17. North star
 
 ```text
 "I have a useful Skill"
