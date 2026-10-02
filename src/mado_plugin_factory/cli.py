@@ -38,6 +38,13 @@ from .marketplace import (
     write_install_evidence,
     write_marketplace_bridge,
 )
+from .patch import (
+    DEFAULT_SCAFFOLD as DEFAULT_PATCH_SCAFFOLD,
+    PatchError,
+    apply_extension_patch,
+    compile_extension_patch,
+    public_patch_report,
+)
 from .scanner import ScanError, scan_candidate
 from .scaffold import (
     DEFAULT_OUTPUT as DEFAULT_SCAFFOLD_OUTPUT,
@@ -95,6 +102,21 @@ def build_parser() -> argparse.ArgumentParser:
     scaffold.add_argument("--write", action="store_true", help="Write the generated scaffold pack")
     scaffold.add_argument("--force", action="store_true", help="Replace differing scaffold files")
     scaffold.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
+
+    patch = sub.add_parser("patch", help="Plan or apply an extension scaffold pack to active source")
+    patch.add_argument("path", nargs="?", default=".", help="Candidate directory (default: .)")
+    patch.add_argument(
+        "--scaffold",
+        default=DEFAULT_PATCH_SCAFFOLD,
+        help=f"Relative scaffold directory (default: {DEFAULT_PATCH_SCAFFOLD})",
+    )
+    patch.add_argument("--apply", action="store_true", help="Apply the inspected patch plan")
+    patch.add_argument("--force", action="store_true", help="Replace differing generated source files")
+    patch.add_argument(
+        "--evidence-output",
+        help="Relative executed evidence path; defaults to evidence/patches/extensions/<patch-id>.json",
+    )
+    patch.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
 
     manifest = sub.add_parser("manifest", help="Compile a portable plugin.json manifest")
     manifest.add_argument("path", nargs="?", default=".", help="Candidate directory (default: .)")
@@ -219,6 +241,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_extensions(args)
     if args.command == "scaffold":
         return _run_scaffold(args)
+    if args.command == "patch":
+        return _run_patch(args)
     if args.command == "manifest":
         return _run_manifest(args)
     if args.command == "evals":
@@ -284,6 +308,29 @@ def _run_scaffold(args: argparse.Namespace) -> int:
 
     _print_json(public_scaffold_report(report), pretty=args.pretty)
     return 0 if report["summary"]["generated_count"] > 0 else 2
+
+
+def _run_patch(args: argparse.Namespace) -> int:
+    try:
+        report = compile_extension_patch(
+            Path(args.path),
+            scaffold=args.scaffold,
+        )
+        if args.apply:
+            report = apply_extension_patch(
+                Path(args.path),
+                report,
+                force=args.force,
+                evidence_output=args.evidence_output,
+            )
+    except (PatchError, ScaffoldError, ExtensionError, ScanError) as exc:
+        _print_error(str(exc))
+        return 1
+
+    _print_json(public_patch_report(report), pretty=args.pretty)
+    if args.apply:
+        return 0 if report.get("applied") and report.get("post_apply", {}).get("verified") else 2
+    return 0 if report["apply_ready"] else 2
 
 
 def _run_manifest(args: argparse.Namespace) -> int:

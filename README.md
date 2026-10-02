@@ -13,6 +13,7 @@ Skill / Repo
   -> MPF-M0.5 Submission Evidence Bundle
   -> MPF-M0.6 Extension Capability Compiler
   -> MPF-M0.7 Extension Scaffold Generator
+  -> MPF-M0.8 Extension Apply / Patch Engine
 ```
 
 ## Status
@@ -25,8 +26,9 @@ Skill / Repo
 - **MPF-M0.5 Submission Evidence Bundle** ✅
 - **MPF-M0.6 Extension Capability Compiler** ✅
 - **MPF-M0.7 Extension Scaffold Generator** ✅
+- **MPF-M0.8 Extension Apply / Patch Engine** ✅
 
-Current package version: `0.7.0`.
+Current package version: `0.8.0`.
 
 ## M0.1 Candidate Scanner
 
@@ -308,6 +310,32 @@ evidence/scaffolds/extensions/
 
 The `apply/` tree is a proposal mirror, not an active package tree. M0.7 skips detected capabilities, refuses blocked capabilities, and keeps missing product inputs explicit. Existing differing scaffold files require `--force`.
 
+## M0.8 Extension Apply / Patch Engine
+
+M0.8 promotes an M0.7 proposal pack into active plugin source with an inspect-first patch plan, hash preconditions, conflict detection, and post-apply M0.6 verification.
+
+Inspect without changing source:
+
+```bash
+mpf patch /path/to/plugin --pretty
+```
+
+Apply after reviewing the plan:
+
+```bash
+mpf patch /path/to/plugin --apply --pretty
+```
+
+Differing generated source files require explicit `--force`. Semantic manifest conflicts are never force-overwritten.
+
+Successful apply writes executed evidence under:
+
+```text
+evidence/patches/extensions/<patch-id>.json
+```
+
+M0.8 distinguishes **source applied** from **runtime verified**. It re-runs M0.6 and requires promoted extension markers to become statically `detected`, while keeping `runtime_verified: false` until a later ChatGPT execution stage proves behavior.
+
 ## Evidence states
 
 The factory uses only:
@@ -324,7 +352,7 @@ A stronger evidence state is never claimed without corresponding proof or explic
 PYTHONPATH=src python -m unittest discover -s tests -v
 ```
 
-Coverage includes the full M0.1-M0.7 pipeline, including deterministic ZIP generation, bundle overwrite safety, MCP-specific submission blockers, local install evidence, path containment, and secret-bearing metadata rejection.
+Coverage includes the full M0.1-M0.8 pipeline, including deterministic ZIP generation, bundle overwrite safety, MCP-specific submission blockers, local install evidence, path containment, and secret-bearing metadata rejection.
 
 ## Source of truth
 
