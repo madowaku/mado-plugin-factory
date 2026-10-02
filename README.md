@@ -1,68 +1,75 @@
 # MADO Plugin Factory
 
-MADO Plugin Factory turns reusable Skills and MCP-backed workflows into submission-ready OpenAI plugins for ChatGPT and Codex.
+MADO Plugin Factory turns reusable Skills and MCP-backed workflows into reviewable, install-verifiable OpenAI plugin release artifacts.
 
-## Goal
+## Pipeline
 
 ```text
 Skill / Repo
-  -> Candidate Scan
-  -> Manifest Compile
-  -> Submission Eval Compile
-  -> Local Marketplace Bridge
-  -> Submission Evidence Bundle
+  -> MPF-M0.1 Candidate Scanner
+  -> MPF-M0.2 Manifest Compiler
+  -> MPF-M0.3 Submission Eval Compiler
+  -> MPF-M0.4 Local Marketplace Bridge
+  -> MPF-M0.5 Submission Evidence Bundle
 ```
 
-## Current status
+## Status
 
 - **MPF-M0.0 Skeleton** ✅
 - **MPF-M0.1 Candidate Scanner** ✅
 - **MPF-M0.2 Manifest Compiler** ✅
 - **MPF-M0.3 Submission Eval Compiler** ✅
 - **MPF-M0.4 Local Marketplace Bridge** ✅
-- **MPF-M0.5 Submission Evidence Bundle** ✅\n\nCurrent package version: `0.5.0`.
+- **MPF-M0.5 Submission Evidence Bundle** ✅
+
+Current package version: `0.5.0`.
 
 ## M0.1 Candidate Scanner
 
 ```bash
-mpf scan /path/to/candidate --pretty
+mpf scan /path/to/plugin --pretty
 ```
 
-The scanner is read-only. It classifies the candidate, inventories Skills/MCP/dependencies, and emits risk flags with evidence paths.
+Read-only static inspection of Skills, MCP surfaces, dependencies, risk flags, and missing packaging requirements.
+
+Generated `evidence/` is excluded from candidate scans so evidence creation cannot change the source scan result.
 
 ## M0.2 Manifest Compiler
 
 ```bash
-mpf manifest /path/to/candidate \
+mpf manifest /path/to/plugin \
   --metadata ./manifest-metadata.json \
   --write
 ```
 
-The portable root `plugin.json` is canonical. Compilation is dry-run by default and differing output requires `--force`.
+Compiles canonical portable `plugin.json`, validates OpenAI interface metadata, and can optionally emit a compatibility `.codex-plugin/plugin.json`.
 
 ## M0.3 Submission Eval Compiler
 
 ```bash
-mpf evals /path/to/candidate \
+mpf evals /path/to/plugin \
   --metadata ./eval-metadata.json \
   --write
 ```
 
-It compiles exactly five positive and three negative reviewer drafts. Generated cases stay `review_required: true` and `evidence_state: generated`.
+Compiles exactly five positive and three negative review cases. Generated cases stay:
+
+```json
+{
+  "evidence_state": "generated",
+  "review_required": true
+}
+```
+
+Default evidence path:
+
+```text
+evidence/evals/test-cases.json
+```
 
 ## M0.4 Local Marketplace Bridge
 
-M0.4 turns a validated plugin package into a repo marketplace entry that ChatGPT desktop / Codex can discover.
-
-Dry-run:
-
-```bash
-mpf marketplace bridge /path/to/plugin \
-  --root /path/to/marketplace-root \
-  --pretty
-```
-
-Write the bridge:
+Stage a curated plugin package and write a local marketplace:
 
 ```bash
 mpf marketplace bridge /path/to/plugin \
@@ -70,75 +77,7 @@ mpf marketplace bridge /path/to/plugin \
   --write
 ```
 
-The bridge stages only distributable plugin files into:
-
-```text
-<marketplace-root>/
-  .agents/plugins/marketplace.json
-  plugins/
-    <plugin-name>/
-      plugin.json
-      skills/
-      mcp.json              # optional
-      .mcp.json             # optional compatibility
-      .app.json             # optional
-      hooks/                # optional
-      assets/               # optional
-      .codex-plugin/
-        plugin.json         # optional compatibility
-```
-
-The marketplace entry points at:
-
-```text
-./plugins/<plugin-name>
-```
-
-Paths must remain relative to the marketplace root.
-
-The bridge preserves unrelated existing plugin entries in the same catalog. A differing staged plugin or marketplace catalog is not replaced unless `--force` is explicit.
-
-### Install verification
-
-Writing the catalog is **not** treated as proof that ChatGPT installed the plugin.
-
-After restarting ChatGPT desktop and installing from the local marketplace, verify the actual installed cache copy:
-
-```bash
-mpf marketplace verify /path/to/plugin \
-  --root /path/to/marketplace-root \
-  --pretty
-```
-
-By default, M0.4 checks:
-
-```text
-~/.codex/plugins/cache/<marketplace-name>/<plugin-name>/local/
-```
-
-The verifier checks:
-
-- marketplace catalog validity
-- expected plugin entry
-- staged package presence
-- installed cache directory
-- installed `plugin.json`
-- plugin identity
-- SHA-256 package digest equality between staged and installed copies
-
-Only an exact cache match returns:
-
-```json
-{
-  "evidence_state": "executed",
-  "install_verified": true,
-  "blocking_reasons": []
-}
-```
-
-A missing cache, invalid installed manifest, or stale installed copy is also recorded as executed evidence, but `install_verified` remains false.
-
-Persist the verification:
+After installing from ChatGPT desktop, verify the actual cache copy:
 
 ```bash
 mpf marketplace verify /path/to/plugin \
@@ -146,27 +85,167 @@ mpf marketplace verify /path/to/plugin \
   --write-evidence
 ```
 
-Default evidence path:
+Successful verification records:
+
+```json
+{
+  "evidence_state": "executed",
+  "install_verified": true
+}
+```
+
+Default install evidence:
 
 ```text
 evidence/marketplace/install-verification.json
 ```
 
-The evidence output cannot escape the plugin root.
+## M0.5 Submission Evidence Bundle
 
-### Why the cache check matters
+M0.5 aggregates the whole release trail and creates a deterministic plugin ZIP.
 
-For local marketplace plugins, ChatGPT installs a copy under `~/.codex/plugins/cache/` and loads that installed copy rather than the marketplace source directory directly. M0.4 therefore verifies the cache copy instead of assuming catalog visibility equals successful installation.
+Start from the template:
 
-## Evidence discipline
+```text
+templates/release/submission.json
+```
 
-The factory uses:
+Dry-run:
+
+```bash
+mpf bundle /path/to/plugin \
+  --release-metadata ./release.json \
+  --pretty
+```
+
+Write the versioned bundle:
+
+```bash
+mpf bundle /path/to/plugin \
+  --release-metadata ./release.json \
+  --write
+```
+
+Default output:
+
+```text
+evidence/releases/<plugin-version>/
+  bundle.json
+  scanner.json
+  manifest-validation.json
+  evals.json
+  install-verification.json
+  release-metadata.json
+  plugin.zip
+  plugin.zip.sha256
+```
+
+### Plugin ZIP vs evidence
+
+`plugin.zip` contains only curated distributable plugin surfaces:
+
+- `plugin.json`
+- `skills/**`
+- optional `mcp.json`
+- optional `.mcp.json`
+- optional `.app.json`
+- optional `hooks/**`
+- optional `assets/**`
+- optional compatibility `.codex-plugin/plugin.json`
+
+It does **not** include repo docs, tests, or `evidence/**`.
+
+The surrounding release directory carries the audit trail.
+
+### Deterministic ZIP
+
+The ZIP uses:
+
+- sorted curated package paths
+- fixed ZIP timestamps
+- fixed file permissions
+- deterministic compression settings
+
+The bundle also writes:
+
+```text
+plugin.zip.sha256
+```
+
+so the upload artifact can be identified exactly.
+
+### Two readiness levels
+
+M0.5 deliberately separates:
+
+#### `upload_ready`
+
+Local release preparation is complete:
+
+- manifest validates
+- 5/3 eval evidence exists
+- eval cases were explicitly reviewed
+- final Skill tree was explicitly tested
+- listing was reviewed
+- local install verification succeeded
+- availability is present
+- release notes are present
+
+#### `submission_ready`
+
+Everything above plus final publishing/portal prerequisites are explicitly attested:
+
+- realistic starter prompts
+- final listing copy/category/logo
+- public HTTPS website/support/privacy/terms URLs
+- Apps Management write access
+- verified publisher identity
+- policy attestations complete
+- bundled Skill safety scan passed
+
+For MCP submissions, M0.5 additionally requires:
+
+- production HTTPS MCP URL
+- demo recording URL
+- domain verification
+- current tool scan
+- reviewed tool annotations
+- reviewer-access setup ready
+
+The compiler does not fabricate these states. Every boolean defaults to false.
+
+### Release metadata is not a secrets file
+
+M0.5 accepts release state and attestations only. Do not put passwords, tokens, API keys, or reviewer credentials into release metadata.
+
+Secret-bearing field names are rejected.
+
+### Exit codes
+
+`mpf bundle` returns:
+
+- `0`: submission-ready
+- `3`: upload-ready, but final submission blockers remain
+- `2`: local/upload blockers remain
+- `1`: invalid input or compiler error
+
+### Write safety
+
+Bundle generation is dry-run unless `--write` is supplied.
+
+Existing differing bundle files require `--force`.
+
+The output directory must stay inside the plugin root.
+
+## Evidence states
+
+The factory uses only:
 
 - `generated`
 - `inspected`
 - `executed`
 
-A stronger evidence state is never claimed without corresponding proof.
+A stronger evidence state is never claimed without corresponding proof or explicit review attestation.
 
 ## Tests
 
@@ -174,24 +253,11 @@ A stronger evidence state is never claimed without corresponding proof.
 PYTHONPATH=src python -m unittest discover -s tests -v
 ```
 
-Coverage includes:
-
-- candidate architecture scanning
-- portable/compatibility manifest compilation
-- 5/3 submission eval generation
-- marketplace catalog generation
-- package staging filters
-- existing-catalog merge
-- overwrite protection
-- missing-cache verification
-- exact installed-cache verification
-- stale-cache detection
-- evidence path containment
-- CLI dry-run behavior
+Coverage includes the full M0.1-M0.5 pipeline, including deterministic ZIP generation, bundle overwrite safety, MCP-specific submission blockers, local install evidence, path containment, and secret-bearing metadata rejection.
 
 ## Source of truth
 
-Implementation tracks:
+Implementation tracks current OpenAI plugin documentation:
 
 - https://developers.openai.com/plugins/build/plugins
 - https://developers.openai.com/plugins/build/skills
@@ -200,8 +266,14 @@ Implementation tracks:
 
 ## Design rule
 
-Do not optimize first for "publishing a plugin."
+The product is not a plugin generator.
 
-Optimize for a deterministic transformation from a known-good Skill into a reviewable, testable, install-verifiable plugin artifact.
+It is a **release-confidence compiler**:
 
-The product is a **release-confidence compiler**.
+```text
+"I have a useful Skill"
+        ->
+"I have the exact ZIP, review cases, local-install proof,
+release metadata, blockers, and evidence trail needed
+to explain what is ready and what is not."
+```
