@@ -19,6 +19,7 @@ Skill / Repo
   -> MPF-M1.1 Host Trace Capture / Normalizer
   -> MPF-M1.2 Extension Verification Orchestrator
   -> MPF-M1.3 Verification Promotion Gate / Release Bundle Bridge
+  -> MPF-M1.4 Verification Freshness / Remote MCP Drift Gate
 ```
 
 ## Status
@@ -37,8 +38,9 @@ Skill / Repo
 - **MPF-M1.1 Host Trace Capture / Normalizer** ✅
 - **MPF-M1.2 Extension Verification Orchestrator** ✅
 - **MPF-M1.3 Verification Promotion Gate / Release Bundle Bridge** ✅
+- **MPF-M1.4 Verification Freshness / Remote MCP Drift Gate** ✅
 
-Current package version: `1.3.0`.
+Current package version: `1.4.0`.
 
 ## M0.1 Candidate Scanner
 
@@ -566,6 +568,30 @@ Exit codes:
 - `2`: underlying release submission material is not ready
 - `1`: promotion input/validation/write error
 
+## M1.4 Verification Freshness / Remote MCP Drift Gate
+
+M1.4 detects MCP server drift that package hashing cannot see. M0.9 now records a privacy-safe `runtime_fingerprint` over the negotiated protocol, advertised capabilities, tool descriptors, and referenced MCP App resource digests.
+
+Standalone freshness check:
+
+```bash
+mpf freshness /path/to/plugin \\
+  --verification-evidence evidence/verifications/extensions/<verification-id>/dossier.json \\
+  --pretty
+```
+
+The fingerprint includes tool names/descriptions/schemas/annotations/security metadata, OpenAI/UI extension metadata, and SHA-256 digests of referenced resource content. Raw UI HTML is still not persisted. `serverInfo` is intentionally excluded from the drift verdict because it is self-reported metadata.
+
+`mpf promote` now performs this live re-probe automatically before promotion. If the current advertised MCP surface differs from the runtime snapshot used by M1.2, promotion is blocked with `verification_freshness_stale`, even when the plugin package digest itself is unchanged.
+
+Freshness evidence can also be persisted under:
+
+```text
+evidence/freshness/extensions/<freshness-id>.json
+```
+
+The drift report identifies changed fingerprint components plus added/removed tool names and resource URIs. Its scope is deliberately `advertised_mcp_surface`: it detects metadata/resource drift, but does not claim unchanged business behavior or authorization enforcement.
+
 ## Evidence states
 
 The factory uses only:
@@ -582,7 +608,7 @@ A stronger evidence state is never claimed without corresponding proof or explic
 PYTHONPATH=src python -m unittest discover -s tests -v
 ```
 
-Coverage includes the full M0.1-M1.3 pipeline, including deterministic ZIP generation, bundle overwrite safety, MCP-specific submission blockers, local install evidence, path containment, and secret-bearing metadata rejection.
+Coverage includes the full M0.1-M1.4 pipeline, including deterministic ZIP generation, bundle overwrite safety, MCP-specific submission blockers, local install evidence, path containment, and secret-bearing metadata rejection.
 
 ## Source of truth
 
