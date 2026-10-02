@@ -445,7 +445,13 @@ class ExtensionVerificationOrchestratorTests(unittest.TestCase):
             )
             first = write_verification_dossier(root, report)
             second = write_verification_dossier(root, report)
-            self.assertEqual(first, second)
+            self.assertEqual(sorted(first), sorted(second))
+            self.assertTrue(
+                all(status == "written" for status in first.values())
+            )
+            self.assertTrue(
+                all(status == "unchanged" for status in second.values())
+            )
 
             output = root / report["output"]
             expected = {
