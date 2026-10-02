@@ -70,6 +70,7 @@ def compile_manifest(
 
     metadata = deepcopy(metadata or {})
     existing = _load_existing_portable(root)
+    existing_openai_extension = _portable_openai_extension(existing)
 
     name = _first_nonempty(metadata.get("name"), existing.get("name"), root.name)
     version = _first_nonempty(metadata.get("version"), existing.get("version"), "0.1.0")
@@ -121,6 +122,12 @@ def compile_manifest(
         hooks_value = "./hooks/hooks.json"
     if hooks_value:
         openai_extension["hooks"] = deepcopy(hooks_value)
+
+    onboarding_skill = metadata.get("onboardingSkill")
+    if onboarding_skill is None:
+        onboarding_skill = existing_openai_extension.get("onboardingSkill")
+    if onboarding_skill:
+        openai_extension["onboardingSkill"] = deepcopy(onboarding_skill)
 
     manifest["extensions"] = {"com.openai": openai_extension}
 
@@ -243,6 +250,8 @@ def validate_manifest(manifest: dict[str, Any], *, root: Path | None = None) -> 
 
     if openai_ext is not None:
         _validate_component_path(openai_ext.get("apps"), "apps", error)
+        if openai_ext.get("onboardingSkill") is not None:
+            _validate_component_path(openai_ext.get("onboardingSkill"), "onboardingSkill", error)
         hooks = openai_ext.get("hooks")
         if isinstance(hooks, list):
             for idx, item in enumerate(hooks):
@@ -270,6 +279,13 @@ def validate_manifest(manifest: dict[str, Any], *, root: Path | None = None) -> 
             target = root / hooks[2:]
             if not target.is_file():
                 error("hooks_file_missing", f"{hooks} does not exist in the candidate root")
+        onboarding_skill = openai_ext.get("onboardingSkill")
+        if isinstance(onboarding_skill, str) and _valid_component_path(onboarding_skill):
+            target = root / onboarding_skill[2:]
+            if not target.is_file():
+                error("onboarding_skill_file_missing", f"{onboarding_skill} does not exist in the candidate root")
+            elif target.name != "SKILL.md":
+                error("onboarding_skill_not_skill", "onboardingSkill must reference a packaged SKILL.md")
 
     return {"valid": not errors, "errors": errors, "warnings": warnings}
 
@@ -424,13 +440,16 @@ def _load_existing_portable(root: Path) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-def _portable_interface(manifest: dict[str, Any]) -> dict[str, Any]:
+def _portable_openai_extension(manifest: dict[str, Any]) -> dict[str, Any]:
     extensions = manifest.get("extensions")
     if not isinstance(extensions, dict):
         return {}
     openai_ext = extensions.get("com.openai")
-    if not isinstance(openai_ext, dict):
-        return {}
+    return deepcopy(openai_ext) if isinstance(openai_ext, dict) else {}
+
+
+def _portable_interface(manifest: dict[str, Any]) -> dict[str, Any]:
+    openai_ext = _portable_openai_extension(manifest)
     interface = openai_ext.get("interface")
     return deepcopy(interface) if isinstance(interface, dict) else {}
 
