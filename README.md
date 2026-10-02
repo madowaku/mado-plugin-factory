@@ -15,6 +15,7 @@ Skill / Repo
   -> MPF-M0.7 Extension Scaffold Generator
   -> MPF-M0.8 Extension Apply / Patch Engine
   -> MPF-M0.9 Extension Runtime Smoke / Evidence
+  -> MPF-M1.0 ChatGPT Host Replay / Extension Acceptance
 ```
 
 ## Status
@@ -29,8 +30,9 @@ Skill / Repo
 - **MPF-M0.7 Extension Scaffold Generator** ✅
 - **MPF-M0.8 Extension Apply / Patch Engine** ✅
 - **MPF-M0.9 Extension Runtime Smoke / Evidence** ✅
+- **MPF-M1.0 ChatGPT Host Replay / Extension Acceptance** ✅
 
-Current package version: `0.9.0`.
+Current package version: `1.0.0`.
 
 ## M0.1 Candidate Scanner
 
@@ -371,6 +373,60 @@ Default evidence path:
 evidence/runtime/extensions/<server>-<smoke-id>.json
 ```
 
+## M1.0 ChatGPT Host Replay / Extension Acceptance
+
+M1.0 closes the host-only gap left by M0.9. It replays a normalized trace captured from an executed ChatGPT developer-mode, installed-plugin, or API Playground session and combines that trace with successful M0.9 runtime evidence.
+
+Start from:
+
+```text
+templates/host-replay/trace.json
+```
+
+The template is deliberately unattested. Replace the normalized events with observations from the real ChatGPT session, then set `capture.executed` and `capture.attested_chatgpt_capture` only when that capture actually occurred.
+
+Replay without writing evidence:
+
+```bash
+mpf host-replay /path/to/plugin \\
+  --trace ./chatgpt-host-trace.json \\
+  --runtime-evidence evidence/runtime/extensions/<runtime>.json \\
+  --pretty
+```
+
+Persist acceptance evidence:
+
+```bash
+mpf host-replay /path/to/plugin \\
+  --trace ./chatgpt-host-trace.json \\
+  --runtime-evidence evidence/runtime/extensions/<runtime>.json \\
+  --write-evidence \\
+  --pretty
+```
+
+M1.0 verifies the three host-required surfaces from M0.9:
+
+- Deep links: ChatGPT supplies a valid `openai/deepLink` host-context path during UI initialization or a host-context change notification.
+- Model-App Context: an app `ui/update-model-context` request has a correlated host response containing an `openai/modelContext.updateId`.
+- Rich forms: an elicitation request has a correlated ChatGPT response with `accept`, `decline`, or `cancel`.
+
+The acceptance artifact stores the trace SHA-256, capture metadata, correlation evidence, and verdicts. It does **not** copy model-context text, form content, deep-link path text, raw host logs, or credentials.
+
+`end_to_end_verified=true` requires all of the following: successful M0.9 `runtime_smoke_passed`, at least one host-required extension, complete replay evidence for every expected host-required extension, and an explicit attestation that the trace came from an executed ChatGPT capture.
+
+Exit codes:
+
+- `0`: end-to-end host acceptance verified
+- `3`: replay shape passes but ChatGPT capture is unattested
+- `2`: expected host acceptance evidence is incomplete
+- `1`: trace/runtime evidence error
+
+Default output:
+
+```text
+evidence/host/extensions/<acceptance-id>.json
+```
+
 ## Evidence states
 
 The factory uses only:
@@ -387,7 +443,7 @@ A stronger evidence state is never claimed without corresponding proof or explic
 PYTHONPATH=src python -m unittest discover -s tests -v
 ```
 
-Coverage includes the full M0.1-M0.9 pipeline, including deterministic ZIP generation, bundle overwrite safety, MCP-specific submission blockers, local install evidence, path containment, and secret-bearing metadata rejection.
+Coverage includes the full M0.1-M1.0 pipeline, including deterministic ZIP generation, bundle overwrite safety, MCP-specific submission blockers, local install evidence, path containment, and secret-bearing metadata rejection.
 
 ## Source of truth
 
