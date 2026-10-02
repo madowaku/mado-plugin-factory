@@ -58,6 +58,12 @@ from .patch import (
     compile_extension_patch,
     public_patch_report,
 )
+from .promotion import (
+    PromotionError,
+    compile_verification_promotion,
+    public_promotion_report,
+    write_promoted_release,
+)
 from .runtime import RuntimeSmokeError, run_extension_runtime_smoke
 from .scanner import ScanError, scan_candidate
 from .scaffold import (
@@ -320,6 +326,31 @@ def build_parser() -> argparse.ArgumentParser:
     verify.add_argument("--force", action="store_true", help="Replace differing evidence output")
     verify.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
 
+    promote = sub.add_parser("promote", help="Gate a verified extension run into a release bundle")
+    promote.add_argument("path", nargs="?", default=".", help="Plugin candidate directory")
+    promote.add_argument("--release-metadata", type=Path, help="JSON release/submission attestations")
+    promote.add_argument("--verification-evidence", required=True, help="Relative M1.2 dossier.json path")
+    promote.add_argument(
+        "--requirement",
+        default="auto",
+        choices=["auto", "mcp_server", "chatgpt_host"],
+        help="Verification level required for promotion (default: auto)",
+    )
+    promote.add_argument(
+        "--eval-evidence",
+        default=DEFAULT_EVAL_EVIDENCE,
+        help=f"Relative eval evidence path (default: {DEFAULT_EVAL_EVIDENCE})",
+    )
+    promote.add_argument(
+        "--install-evidence",
+        default=DEFAULT_INSTALL_EVIDENCE,
+        help=f"Relative install evidence path (default: {DEFAULT_INSTALL_EVIDENCE})",
+    )
+    promote.add_argument("--output", help="Relative release directory; defaults to evidence/releases/<plugin-version>")
+    promote.add_argument("--write", action="store_true", help="Write promoted release bundle plus verification bridge evidence")
+    promote.add_argument("--force", action="store_true", help="Replace differing release/promotion artifacts")
+    promote.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
+
     bundle = sub.add_parser("bundle", help="Compile a versioned submission evidence bundle")
     bundle.add_argument("path", nargs="?", default=".", help="Plugin candidate directory")
     bundle.add_argument("--release-metadata", type=Path, help="JSON release/submission attestations")
@@ -371,6 +402,8 @@ def main(argv: list[str] | None = None) -> int:
             return _run_marketplace_bridge(args)
         if args.marketplace_command == "verify":
             return _run_marketplace_verify(args)
+    if args.command == "promote":
+        return _run_promote(args)
     if args.command == "bundle":
         return _run_bundle(args)
     return 1
@@ -650,6 +683,36 @@ def _run_marketplace_verify(args: argparse.Namespace) -> int:
 
     _print_json(report, pretty=args.pretty)
     return 0 if report["install_verified"] else 2
+
+
+def _run_promote(args: argparse.Namespace) -> int:
+    try:
+        metadata = load_release_metadata(args.release_metadata) if args.release_metadata else {}
+        report = compile_verification_promotion(
+            Path(args.path),
+            release_metadata=metadata,
+            verification_evidence=args.verification_evidence,
+            requirement=args.requirement,
+            eval_evidence=args.eval_evidence,
+            install_evidence=args.install_evidence,
+        )
+        if args.write:
+            report["write_result"] = write_promoted_release(
+                Path(args.path),
+                report,
+                output=args.output,
+                force=args.force,
+            )
+    except (PromotionError, BundleError, ScanError) as exc:
+        _print_error(str(exc))
+        return 1
+
+    _print_json(public_promotion_report(report), pretty=args.pretty)
+    if report["promotion_ready"]:
+        return 0
+    if report["release"]["submission_ready"]:
+        return 3
+    return 2
 
 
 def _run_bundle(args: argparse.Namespace) -> int:

@@ -12,6 +12,7 @@ from .capture import (
     public_capture_report,
 )
 from .host import HostReplayError, evaluate_host_replay
+from .marketplace import plugin_package_digest
 from .runtime import RuntimeSmokeError, run_extension_runtime_smoke
 
 SCHEMA_VERSION = "0.1"
@@ -58,6 +59,8 @@ def run_extension_verification(
         raise VerificationOrchestratorError(
             "--capture requires --surface and --capture-mode"
         )
+
+    package_digest = plugin_package_digest(root)
 
     runtime: dict[str, Any] | None = None
     capture_report: dict[str, Any] | None = None
@@ -237,6 +240,7 @@ def run_extension_verification(
         trace_digest=trace_digest,
         host_digest=host_digest,
         stage_errors=stage_errors,
+        package_digest=package_digest,
     )
     resolved_output = output_dir or (
         f"{DEFAULT_OUTPUT_DIR}/{verification_id}"
@@ -307,6 +311,7 @@ def run_extension_verification(
         "source": {
             "root": str(root),
             "capture_supplied": capture_input is not None,
+            "plugin_package_digest": package_digest,
         },
         "stages": {
             "runtime_smoke": _runtime_stage(
@@ -584,6 +589,7 @@ def _verification_id(
     trace_digest: str | None,
     host_digest: str | None,
     stage_errors: list[dict[str, str]],
+    package_digest: str,
 ) -> str:
     payload = {
         "state": state,
@@ -592,6 +598,7 @@ def _verification_id(
         "trace": trace_digest,
         "host": host_digest,
         "errors": stage_errors,
+        "plugin_package_digest": package_digest,
     }
     return _sha256(
         json.dumps(

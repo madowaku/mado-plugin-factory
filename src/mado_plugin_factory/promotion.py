@@ -1,0 +1,637 @@
+from __future__ import annotations
+
+import hashlib
+import json
+from copy import deepcopy
+from pathlib import Path
+from typing import Any
+
+from .bundle import (
+    DEFAULT_EVAL_EVIDENCE,
+    DEFAULT_INSTALL_EVIDENCE,
+    BundleError,
+    compile_submission_bundle,
+    write_submission_bundle,
+)
+from .marketplace import plugin_package_digest
+
+SCHEMA_VERSION = "0.1"
+DEFAULT_VERIFICATIONS_ROOT = "evidence/verifications/extensions"
+VALID_REQUIREMENTS = {"auto", "mcp_server", "chatgpt_host"}
+
+
+class PromotionError(ValueError):
+    pass
+
+
+def compile_verification_promotion(
+    root: Path,
+    *,
+    release_metadata: dict[str, Any] | None = None,
+    verification_evidence: str,
+    requirement: str = "auto",
+    eval_evidence: str = DEFAULT_EVAL_EVIDENCE,
+    install_evidence: str = DEFAULT_INSTALL_EVIDENCE,
+) -> dict[str, Any]:
+    root = root.expanduser().resolve()
+    if not root.exists() or not root.is_dir():
+        raise PromotionError(f"candidate path is not a directory: {root}")
+    if requirement not in VALID_REQUIREMENTS:
+        raise PromotionError(
+            "verification requirement must be auto, mcp_server, or chatgpt_host"
+        )
+
+    verification_path = _safe_existing_file(
+        root,
+        verification_evidence,
+        label="verification dossier",
+    )
+    dossier = _load_json_object(
+        verification_path,
+        "verification dossier",
+    )
+    validation = _validate_verification_dossier(
+        root,
+        verification_path,
+        dossier,
+    )
+
+    current_package_digest = plugin_package_digest(root)
+    verified_package_digest = (
+        dossier.get("source", {}).get("plugin_package_digest")
+        if isinstance(dossier.get("source"), dict)
+        else None
+    )
+    package_bound = bool(
+        isinstance(verified_package_digest, str)
+        and verified_package_digest
+        and verified_package_digest == current_package_digest
+    )
+
+    resolved_requirement = _resolve_requirement(
+        dossier,
+        requirement,
+    )
+    state = dossier.get("verification_state")
+    verification_verified = dossier.get(
+        "verification_verified"
+    ) is True
+
+    state_satisfies = _state_satisfies(
+        state,
+        resolved_requirement,
+    )
+    gate_passed = bool(
+        validation["valid"]
+        and package_bound
+        and verification_verified
+        and state_satisfies
+    )
+
+    verification_blockers: list[str] = []
+    if not validation["valid"]:
+        verification_blockers.extend(
+            validation["blocking_reasons"]
+        )
+    if not isinstance(verified_package_digest, str) or not verified_package_digest:
+        verification_blockers.append(
+            "verification_package_digest_missing"
+        )
+    elif not package_bound:
+        verification_blockers.append(
+            "verification_package_digest_mismatch"
+        )
+    if not verification_verified:
+        verification_blockers.append(
+            "verification_not_verified"
+        )
+    if not state_satisfies:
+        verification_blockers.append(
+            f"verification_requirement_{resolved_requirement}_not_satisfied"
+        )
+    verification_blockers = _unique(verification_blockers)
+
+    try:
+        bundle = compile_submission_bundle(
+            root,
+            release_metadata=release_metadata,
+            eval_evidence=eval_evidence,
+            install_evidence=install_evidence,
+        )
+    except BundleError as exc:
+        raise PromotionError(str(exc)) from exc
+
+    if bundle["submission_type"] != "with_mcp":
+        raise PromotionError(
+            "extension verification promotion requires a plugin with MCP"
+        )
+
+    dossier_sha256 = hashlib.sha256(
+        verification_path.read_bytes()
+    ).hexdigest()
+    promotion_id = _promotion_id(
+        bundle_id=bundle["bundle_id"],
+        package_digest=current_package_digest,
+        dossier_sha256=dossier_sha256,
+        requirement=resolved_requirement,
+    )
+
+    promotion_ready = bool(
+        bundle["submission_ready"]
+        and gate_passed
+    )
+    promotion_blockers = _unique(
+        list(bundle["blocking_reasons"]["submission"])
+        + verification_blockers
+    )
+
+    verification_check = {
+        "evidence_state": "inspected",
+        "path": verification_evidence,
+        "dossier_sha256": dossier_sha256,
+        "verification_id": dossier.get(
+            "verification_id"
+        ),
+        "verification_state": state,
+        "verification_verified": verification_verified,
+        "requirement_requested": requirement,
+        "requirement_resolved": resolved_requirement,
+        "state_satisfies_requirement": state_satisfies,
+        "package_digest_verified": verified_package_digest,
+        "package_digest_current": current_package_digest,
+        "package_digest_matches": package_bound,
+        "artifact_integrity": validation,
+        "passed": gate_passed,
+    }
+
+    promoted_bundle = deepcopy(bundle)
+    promoted_bundle["source"][
+        "verification_evidence"
+    ] = verification_evidence
+    promoted_bundle["checks"][
+        "extension_verification"
+    ] = verification_check
+    promoted_bundle["promotion"] = {
+        "promotion_id": promotion_id,
+        "promotion_ready": promotion_ready,
+        "requirement": resolved_requirement,
+        "verification_gate_passed": gate_passed,
+        "base_submission_ready": bundle[
+            "submission_ready"
+        ],
+        "blocking_reasons": promotion_blockers,
+    }
+    promoted_bundle["artifacts"][
+        "promotion_report"
+    ] = "promotion.json"
+    promoted_bundle["artifacts"][
+        "verification_directory"
+    ] = "verification"
+
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "evidence_state": "inspected",
+        "promotion_id": promotion_id,
+        "promotion_ready": promotion_ready,
+        "requirement": {
+            "requested": requirement,
+            "resolved": resolved_requirement,
+        },
+        "plugin": {
+            "bundle_id": bundle["bundle_id"],
+            "release_id": bundle["release_id"],
+            "package_digest": current_package_digest,
+        },
+        "verification": verification_check,
+        "release": {
+            "upload_ready": bundle["upload_ready"],
+            "submission_ready": bundle[
+                "submission_ready"
+            ],
+        },
+        "blocking_reasons": promotion_blockers,
+        "bundle": promoted_bundle,
+        "source": {
+            "verification_evidence": verification_evidence,
+        },
+        "_verification_dossier": dossier,
+        "_verification_artifacts": validation[
+            "artifact_payloads"
+        ],
+    }
+
+
+def write_promoted_release(
+    root: Path,
+    report: dict[str, Any],
+    *,
+    output: str | None = None,
+    force: bool = False,
+) -> dict[str, Any]:
+    root = root.expanduser().resolve()
+    bundle = report.get("bundle")
+    if not isinstance(bundle, dict):
+        raise PromotionError(
+            "promotion report is missing bundle report"
+        )
+
+    try:
+        base_result = write_submission_bundle(
+            root,
+            bundle,
+            output=output,
+            force=force,
+        )
+    except BundleError as exc:
+        raise PromotionError(str(exc)) from exc
+
+    bundle_root = Path(base_result["bundle_root"]).resolve()
+    try:
+        bundle_root.relative_to(root)
+    except ValueError as exc:
+        raise PromotionError(
+            "promoted release root escapes plugin root"
+        ) from exc
+
+    dossier = report.get("_verification_dossier")
+    stage_payloads = report.get(
+        "_verification_artifacts"
+    )
+    if not isinstance(dossier, dict):
+        raise PromotionError(
+            "promotion report is missing verification dossier"
+        )
+    if not isinstance(stage_payloads, dict):
+        raise PromotionError(
+            "promotion report is missing verification artifacts"
+        )
+
+    public = public_promotion_report(report)
+    extra: dict[str, bytes] = {
+        "promotion.json": _json_bytes(public),
+        "verification/dossier.json": _json_bytes(
+            dossier
+        ),
+    }
+    for name, payload in sorted(
+        stage_payloads.items()
+    ):
+        extra[f"verification/{name}"] = _json_bytes(
+            payload
+        )
+
+    written: list[str] = []
+    unchanged: list[str] = []
+    for rel, payload in extra.items():
+        target = _safe_child(bundle_root, rel)
+        _reject_symlink_target(root, target)
+        if target.exists():
+            if not target.is_file():
+                raise PromotionError(
+                    f"promoted release target is not a regular file: {target}"
+                )
+            current = target.read_bytes()
+            if current != payload and not force:
+                raise PromotionError(
+                    f"promoted release artifact differs at {target}; use --force to replace it"
+                )
+            if current == payload:
+                unchanged.append(rel)
+                continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(payload)
+        written.append(rel)
+
+    return {
+        **base_result,
+        "promotion_id": report["promotion_id"],
+        "promotion_ready": report[
+            "promotion_ready"
+        ],
+        "promotion_written": written,
+        "promotion_unchanged": unchanged,
+        "promotion_file_count": len(extra),
+    }
+
+
+def public_promotion_report(
+    report: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        key: deepcopy(value)
+        for key, value in report.items()
+        if key
+        not in {
+            "_verification_dossier",
+            "_verification_artifacts",
+        }
+    }
+
+
+def _resolve_requirement(
+    dossier: dict[str, Any],
+    requested: str,
+) -> str:
+    if requested != "auto":
+        return requested
+    summary = dossier.get("summary")
+    host_required = (
+        summary.get("host_required_extensions")
+        if isinstance(summary, dict)
+        else None
+    )
+    if isinstance(host_required, list) and host_required:
+        return "chatgpt_host"
+    return "mcp_server"
+
+
+def _state_satisfies(
+    state: Any,
+    requirement: str,
+) -> bool:
+    if requirement == "chatgpt_host":
+        return state == "verified_chatgpt_host"
+    return state in {
+        "verified_mcp_server",
+        "verified_chatgpt_host",
+    }
+
+
+def _validate_verification_dossier(
+    root: Path,
+    dossier_path: Path,
+    dossier: dict[str, Any],
+) -> dict[str, Any]:
+    blockers: list[str] = []
+    artifact_payloads: dict[str, dict[str, Any]] = {}
+    checks: list[dict[str, Any]] = []
+
+    if dossier.get("evidence_state") != "executed":
+        blockers.append(
+            "verification_evidence_not_executed"
+        )
+    if not isinstance(
+        dossier.get("verification_id"),
+        str,
+    ):
+        blockers.append(
+            "verification_id_missing"
+        )
+
+    stages = dossier.get("stages")
+    artifacts = dossier.get("artifacts")
+    if not isinstance(stages, dict):
+        blockers.append(
+            "verification_stages_missing"
+        )
+        stages = {}
+    if not isinstance(artifacts, dict):
+        blockers.append(
+            "verification_artifacts_missing"
+        )
+        artifacts = {}
+
+    stage_map = [
+        (
+            "runtime_smoke",
+            "runtime",
+            "sha256",
+            "runtime.json",
+        ),
+        (
+            "host_capture",
+            "capture",
+            "sha256",
+            "capture.json",
+        ),
+        (
+            "host_capture",
+            "trace",
+            "trace_sha256",
+            "trace.json",
+        ),
+        (
+            "host_replay",
+            "host",
+            "sha256",
+            "host.json",
+        ),
+    ]
+
+    for stage_name, artifact_key, digest_key, canonical_name in stage_map:
+        stage = stages.get(stage_name)
+        if not isinstance(stage, dict):
+            continue
+        expected = stage.get(digest_key)
+        if expected is None:
+            continue
+        if not isinstance(expected, str) or not expected:
+            blockers.append(
+                f"verification_{artifact_key}_digest_invalid"
+            )
+            continue
+        rel = artifacts.get(artifact_key)
+        if not isinstance(rel, str) or not rel:
+            blockers.append(
+                f"verification_{artifact_key}_artifact_missing"
+            )
+            continue
+        try:
+            path = _safe_existing_file(
+                root,
+                rel,
+                label=f"verification {artifact_key} artifact",
+            )
+            payload = _load_json_object(
+                path,
+                f"verification {artifact_key} artifact",
+            )
+            actual = _json_digest(payload)
+            matches = actual == expected
+            if not matches:
+                blockers.append(
+                    f"verification_{artifact_key}_digest_mismatch"
+                )
+            else:
+                artifact_payloads[
+                    canonical_name
+                ] = payload
+            checks.append(
+                {
+                    "artifact": artifact_key,
+                    "path": rel,
+                    "expected_sha256": expected,
+                    "actual_sha256": actual,
+                    "matches": matches,
+                }
+            )
+        except PromotionError as exc:
+            blockers.append(
+                f"verification_{artifact_key}_artifact_invalid"
+            )
+            checks.append(
+                {
+                    "artifact": artifact_key,
+                    "path": rel,
+                    "matches": False,
+                    "error": str(exc),
+                }
+            )
+
+    return {
+        "valid": not blockers,
+        "blocking_reasons": _unique(blockers),
+        "checks": checks,
+        "artifact_payloads": artifact_payloads,
+        "dossier_path": dossier_path.relative_to(
+            root
+        ).as_posix(),
+    }
+
+
+def _promotion_id(
+    *,
+    bundle_id: str,
+    package_digest: str,
+    dossier_sha256: str,
+    requirement: str,
+) -> str:
+    payload = {
+        "bundle_id": bundle_id,
+        "package_digest": package_digest,
+        "dossier_sha256": dossier_sha256,
+        "requirement": requirement,
+    }
+    return hashlib.sha256(
+        json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()[:20]
+
+
+def _safe_existing_file(
+    root: Path,
+    value: str,
+    *,
+    label: str,
+) -> Path:
+    target = _safe_relative(
+        root,
+        value,
+        label=label,
+    )
+    if not target.is_file() or target.is_symlink():
+        raise PromotionError(
+            f"{label} does not exist: {target}"
+        )
+    return target
+
+
+def _safe_relative(
+    root: Path,
+    value: str,
+    *,
+    label: str,
+) -> Path:
+    if not isinstance(value, str) or not value.strip():
+        raise PromotionError(
+            f"{label} must be a non-empty relative path"
+        )
+    candidate = Path(value)
+    if candidate.is_absolute() or ".." in candidate.parts:
+        raise PromotionError(
+            f"{label} must stay inside the plugin root"
+        )
+    target = (root / candidate).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError as exc:
+        raise PromotionError(
+            f"{label} must stay inside the plugin root"
+        ) from exc
+    return target
+
+
+def _safe_child(
+    parent: Path,
+    relative: str,
+) -> Path:
+    candidate = Path(relative)
+    if candidate.is_absolute() or ".." in candidate.parts:
+        raise PromotionError(
+            "promoted release artifact path escapes release directory"
+        )
+    target = (parent / candidate).resolve()
+    try:
+        target.relative_to(parent)
+    except ValueError as exc:
+        raise PromotionError(
+            "promoted release artifact path escapes release directory"
+        ) from exc
+    return target
+
+
+def _reject_symlink_target(
+    root: Path,
+    target: Path,
+) -> None:
+    rel = target.relative_to(root)
+    current = root
+    for part in rel.parts:
+        current = current / part
+        if current.exists() and current.is_symlink():
+            raise PromotionError(
+                f"refusing symlinked promoted release target: {current}"
+            )
+
+
+def _load_json_object(
+    path: Path,
+    label: str,
+) -> dict[str, Any]:
+    try:
+        value = json.loads(
+            path.read_text(encoding="utf-8")
+        )
+    except (
+        OSError,
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+    ) as exc:
+        raise PromotionError(
+            f"unable to read {label} at {path}: {exc}"
+        ) from exc
+    if not isinstance(value, dict):
+        raise PromotionError(
+            f"{label} at {path} must be a JSON object"
+        )
+    return value
+
+
+def _json_digest(value: Any) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _json_bytes(value: Any) -> bytes:
+    return (
+        json.dumps(
+            value,
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    ).encode("utf-8")
+
+
+def _unique(values: list[str]) -> list[str]:
+    return list(dict.fromkeys(values))

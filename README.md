@@ -18,6 +18,7 @@ Skill / Repo
   -> MPF-M1.0 ChatGPT Host Replay / Extension Acceptance
   -> MPF-M1.1 Host Trace Capture / Normalizer
   -> MPF-M1.2 Extension Verification Orchestrator
+  -> MPF-M1.3 Verification Promotion Gate / Release Bundle Bridge
 ```
 
 ## Status
@@ -35,8 +36,9 @@ Skill / Repo
 - **MPF-M1.0 ChatGPT Host Replay / Extension Acceptance** ✅
 - **MPF-M1.1 Host Trace Capture / Normalizer** ✅
 - **MPF-M1.2 Extension Verification Orchestrator** ✅
+- **MPF-M1.3 Verification Promotion Gate / Release Bundle Bridge** ✅
 
-Current package version: `1.2.0`.
+Current package version: `1.3.0`.
 
 ## M0.1 Candidate Scanner
 
@@ -516,6 +518,54 @@ Exit codes:
 - `2`: runtime/host verification failed or remains incomplete
 - `1`: orchestrator input/write error
 
+## M1.3 Verification Promotion Gate / Release Bundle Bridge
+
+M1.3 promotes an M1.2 verification dossier into the M0.5-style release dossier only when the verification is still bound to the exact current plugin package.
+
+```bash
+mpf promote /path/to/plugin \\
+  --release-metadata ./release.json \\
+  --verification-evidence evidence/verifications/extensions/<verification-id>/dossier.json \\
+  --write \\
+  --pretty
+```
+
+Verification policy can be selected explicitly:
+
+```bash
+--requirement auto|mcp_server|chatgpt_host
+```
+
+`auto` requires ChatGPT-host verification whenever the dossier contains host-required extensions; otherwise MCP-server verification is sufficient. A fully host-verified run also satisfies an explicit `mcp_server` policy.
+
+M1.2 now records the plugin package digest in its dossier and includes that digest in the verification ID. M1.3 recomputes the current package digest and refuses promotion when the package changed after verification. Dossiers created before this binding field existed are visible but not promotable.
+
+M1.3 also recomputes the SHA-256 of the runtime/capture/trace/host stage JSON and compares it with the digests recorded by the dossier. A dossier whose stage artifacts were edited after verification is blocked.
+
+Promotion is an MPF quality gate, not an additional OpenAI submission requirement. The existing M0.5 `submission_ready` verdict remains intact; M1.3 adds a separate `promotion_ready` verdict so official portal readiness and MPF verification policy do not get conflated.
+
+A promoted release directory contains the normal deterministic release bundle plus:
+
+```text
+evidence/releases/<version>/
+  promotion.json
+  verification/
+    dossier.json
+    runtime.json
+    capture.json    # when applicable
+    trace.json      # when applicable
+    host.json       # when applicable
+```
+
+None of these verification artifacts are placed inside `plugin.zip`.
+
+Exit codes:
+
+- `0`: release and verification gate are promotion-ready
+- `3`: normal submission material is ready but the M1.3 verification gate is not
+- `2`: underlying release submission material is not ready
+- `1`: promotion input/validation/write error
+
 ## Evidence states
 
 The factory uses only:
@@ -532,7 +582,7 @@ A stronger evidence state is never claimed without corresponding proof or explic
 PYTHONPATH=src python -m unittest discover -s tests -v
 ```
 
-Coverage includes the full M0.1-M1.2 pipeline, including deterministic ZIP generation, bundle overwrite safety, MCP-specific submission blockers, local install evidence, path containment, and secret-bearing metadata rejection.
+Coverage includes the full M0.1-M1.3 pipeline, including deterministic ZIP generation, bundle overwrite safety, MCP-specific submission blockers, local install evidence, path containment, and secret-bearing metadata rejection.
 
 ## Source of truth
 
