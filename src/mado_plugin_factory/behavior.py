@@ -27,6 +27,7 @@ def run_behavior_canary(
     *,
     contract: str,
     baseline_evidence: str | None = None,
+    verification_evidence: str | None = None,
     server: str | None = None,
     mode: str = "auto",
     timeout: float = 5.0,
@@ -63,6 +64,11 @@ def run_behavior_canary(
         else None
     )
 
+    verification_binding = _verification_binding(
+        root,
+        verification_evidence,
+    ) if verification_evidence else None
+
     baseline: dict[str, Any] | None = None
     if baseline_evidence:
         baseline_path = _safe_existing_file(
@@ -88,6 +94,17 @@ def run_behavior_canary(
             raise CanaryError(
                 "canary contract changed since baseline"
             )
+        if verification_binding is not None:
+            baseline_verification = baseline.get("verification")
+            baseline_dossier_sha = (
+                baseline_verification.get("dossier_sha256")
+                if isinstance(baseline_verification, dict)
+                else None
+            )
+            if baseline_dossier_sha != verification_binding["dossier_sha256"]:
+                raise CanaryError(
+                    "canary baseline is not bound to the selected verification dossier"
+                )
 
     baseline_cases = {
         item.get("id"): item
@@ -293,6 +310,7 @@ def run_behavior_canary(
                 else None
             ),
         },
+        "verification": deepcopy(verification_binding),
         "server": {
             "name": selected_server,
         },
@@ -331,6 +349,43 @@ def run_behavior_canary(
             force=force,
         )
     return report
+
+
+
+def _verification_binding(
+    root: Path,
+    verification_evidence: str,
+) -> dict[str, Any]:
+    path = _safe_existing_file(
+        root,
+        verification_evidence,
+        label="verification dossier",
+    )
+    dossier = _load_json_object(
+        path,
+        "verification dossier",
+    )
+    if dossier.get("evidence_state") != "executed":
+        raise CanaryError(
+            "verification dossier must have evidence_state=executed"
+        )
+    if dossier.get("verification_verified") is not True:
+        raise CanaryError(
+            "verification dossier must be verified before recording/replaying a promotion canary"
+        )
+    verification_id = dossier.get("verification_id")
+    if not isinstance(verification_id, str) or not verification_id:
+        raise CanaryError(
+            "verification dossier is missing verification_id"
+        )
+    return {
+        "path": verification_evidence,
+        "verification_id": verification_id,
+        "dossier_sha256": hashlib.sha256(
+            path.read_bytes()
+        ).hexdigest(),
+    }
+
 
 
 def _validate_contract(
