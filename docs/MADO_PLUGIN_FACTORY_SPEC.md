@@ -1,6 +1,6 @@
-# MADO_PLUGIN_FACTORY_SPEC.md v1.5
+# MADO_PLUGIN_FACTORY_SPEC.md v1.6
 
-Status: Implemented through M1.5  
+Status: Implemented through M1.6  
 Project: MADO Plugin Factory  
 Repository: `madowaku/mado-plugin-factory`
 
@@ -55,6 +55,9 @@ Verification Freshness / Remote MCP Drift Gate <- M1.4 complete
   |
   v
 Behavioral Contract Replay / Remote MCP Canary <- M1.5 complete
+  |
+  v
+Authorization / Negative Contract Replay <- M1.6 complete
 ```
 
 The factory separates "generated", "inspected", and "executed" evidence and refuses to turn missing proof into a release claim.
@@ -1237,7 +1240,187 @@ Both remain outside `plugin.zip`.
 
 M1.5 proves only the declared read-only fixture contracts. It does not automatically exercise write/destructive tools, does not prove all authorization behavior, and does not claim exhaustive business-semantic equivalence.
 
-## 17. Safety rules
+## 17. MPF-M1.6 Authorization / Negative Contract Replay
+
+Status: complete.
+
+### 17.1 Goal
+
+Verify that invalid, unauthorized, missing, and recoverable-error scenarios continue to fail in the expected way, so a release cannot be promoted merely because successful read-only behavior still works.
+
+### 17.2 Negative contract categories
+
+M1.6 supports four explicit categories:
+
+- `invalid_input`
+- `unauthorized`
+- `not_found`
+- `recoverable_error`
+
+Every case declares a stable id, read-only tool, fixture arguments, request context, and expected failure contract.
+
+Negative cases may expect only:
+
+- `tool_error`
+- `protocol_error`
+- `http_error`
+
+A negative case that returns success is always a blocker.
+
+### 17.3 Contract template
+
+Start from:
+
+```text
+templates/negative/contract.json
+```
+
+A case can constrain:
+
+- protocol error code
+- HTTP status
+- whether `WWW-Authenticate` is required/optional/forbidden
+- structured-content presence
+- returned content types
+
+### 17.4 Read-only safety gate
+
+Before any `tools/call`, M1.6 requires the live descriptor to advertise:
+
+```text
+annotations.readOnlyHint = true
+```
+
+Tools that do not explicitly satisfy this condition are refused before invocation.
+
+### 17.5 Authorization replay
+
+`category=unauthorized` requires:
+
+```text
+request_context = anonymous
+```
+
+and is supported only for streamable-HTTP MCP servers.
+
+The authorization replay flow is:
+
+1. connect using the configured MCP authentication
+2. discover/list tools and verify that the selected tool is explicitly read-only
+3. construct a fresh HTTP client with the `Authorization` header omitted
+4. send exactly one negative `tools/call`
+5. observe only HTTP status and privacy-reduced challenge metadata
+
+For 401 contracts, `WWW-Authenticate` is required by default. 401 and 403 are the supported authorization statuses.
+
+M1.6 removes only the standard `Authorization` header. It does not claim to model arbitrary proprietary authentication headers or every OAuth scope/role combination.
+
+### 17.6 Record baseline
+
+```bash
+mpf negative <plugin-root> \
+  --contract ./negative-contract.json \
+  --verification-evidence evidence/verifications/extensions/<id>/dossier.json \
+  --write-evidence
+```
+
+Record mode executes the safe negative fixtures, validates the declared failure expectations, and writes:
+
+```text
+evidence/negative/extensions/<negative-id>.json
+```
+
+When a verification dossier is supplied, its verification ID and dossier SHA-256 are stored in the negative baseline.
+
+### 17.7 Replay
+
+```bash
+mpf negative <plugin-root> \
+  --contract ./negative-contract.json \
+  --baseline evidence/negative/extensions/<baseline-id>.json \
+  --verification-evidence evidence/verifications/extensions/<id>/dossier.json
+```
+
+Replay requires the contract SHA-256 to match the baseline. When verification binding is supplied, the baseline dossier SHA-256 must match the selected M1.2 dossier.
+
+### 17.8 Privacy-reduced failure observation
+
+M1.6 does not persist raw negative inputs or raw error bodies.
+
+Per case it records only:
+
+- argument SHA-256
+- request context
+- outcome class
+- protocol error code
+- HTTP status
+- `WWW-Authenticate` presence
+- SHA-256 of `WWW-Authenticate` when present
+- returned content types
+- recursive structured-content type/key shape
+- overall behavior SHA-256
+
+It does not persist bearer tokens, challenge text, HTTP bodies, tool-result values, protocol error messages, or tool-error text.
+
+### 17.9 Drift semantics
+
+Replay is verified only when:
+
+- every tool passes the read-only safety gate
+- every negative expectation still passes
+- no negative case unexpectedly succeeds
+- every case matches its recorded behavior SHA-256
+- the contract still matches the baseline
+- the verification binding still matches when present
+
+Examples of drift include:
+
+- protocol error code changes
+- 401 becomes success
+- required `WWW-Authenticate` disappears
+- 401 changes to an unexpected status
+- tool-error structured shape changes
+- failure content types change
+
+### 17.10 Promotion integration
+
+Negative replay is opt-in because safe fixture design and authorization setup are product-specific.
+
+```bash
+mpf promote <plugin-root> \
+  --verification-evidence evidence/verifications/extensions/<id>/dossier.json \
+  --negative-contract ./negative-contract.json \
+  --negative-baseline evidence/negative/extensions/<baseline-id>.json
+```
+
+Both flags are required together.
+
+Live promotion ordering becomes:
+
+1. M1.3 package/evidence gate
+2. M1.4 remote MCP freshness
+3. optional M1.5 positive behavioral replay
+4. optional M1.6 negative/authorization replay
+5. promotion verdict
+
+A failed M1.6 replay adds `verification_negative_contract_stale`.
+
+### 17.11 Promoted release evidence
+
+When M1.6 promotion is enabled, the release evidence directory additionally contains:
+
+```text
+verification/negative-baseline.json
+verification/negative-replay.json
+```
+
+These files remain outside `plugin.zip`.
+
+### 17.12 Scope boundary
+
+M1.6 validates only declared read-only negative fixtures and the anonymous/no-`Authorization` boundary for HTTP MCP tools. It does not automatically execute write/destructive tools, brute-force rate limits, test all account roles/scopes, or prove complete authorization correctness.
+
+## 18. Safety rules
 
 M0.5 MUST NOT:
 
@@ -1252,7 +1435,7 @@ M0.5 MUST NOT:
 - write outside the plugin root
 - silently overwrite a differing release bundle
 
-## 18. Acceptance
+## 19. Acceptance
 
 MPF-M0.5 is complete when:
 
@@ -1432,7 +1615,25 @@ MPF-M1.5 is complete when:
 - canary baseline/replay evidence remains outside the plugin ZIP
 - unit/CI tests prove pre-call refusal of non-read-only tools, unchanged replay, stable-value drift, shape drift, privacy, contract drift, CLI behavior, and promotion blocking
 
-## 19. North star
+### MPF-M1.6 acceptance
+
+MPF-M1.6 is complete when:
+
+- one command records negative contract evidence and one command replays it
+- invalid-input, unauthorized, not-found, and recoverable-error categories are modeled explicitly
+- a negative case that unexpectedly succeeds always fails the gate
+- only explicitly read-only tools can reach `tools/call`
+- anonymous authorization replay strips `Authorization` only after authenticated descriptor inspection
+- 401 contracts can require `WWW-Authenticate`
+- raw arguments, tokens, error bodies, result text, and challenge text never enter evidence
+- contract drift invalidates an old baseline
+- negative baselines can be SHA-bound to the exact M1.2 verification dossier
+- M1.4 advertised-surface freshness can remain green while M1.6 detects failure-contract drift
+- live promotion can optionally require M1.6 replay
+- negative baseline/replay evidence remains outside the plugin ZIP
+- unit/CI tests cover invalid/not-found/recoverable failures, unexpected success, unsafe-tool pre-call refusal, 401 challenge behavior, privacy, verification binding, CLI record/replay, promotion blocking, and promoted evidence isolation
+
+## 20. North star
 
 ```text
 "I have a useful Skill"
